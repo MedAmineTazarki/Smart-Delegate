@@ -24,6 +24,7 @@ import { discoverGates, runGates, summarizeGates } from "../verification/gates.m
 import { writeJsonAtomic } from "../utils/fs.mjs";
 import { newRunId, parseDuration } from "../utils/misc.mjs";
 import { log } from "../utils/log.mjs";
+import { L } from "../i18n/index.mjs";
 
 /**
  * Everything routing needs, gathered once.
@@ -98,7 +99,7 @@ export async function runDelegation(args) {
         // git itself failing; the error message above is all we have
       }
     }
-    holder.summary.nextSteps.push("Internal error after the run started. Inspect the working tree before anything else; nothing was reverted.");
+    holder.summary.nextSteps.push(L("run.internalError"));
     log.error(`run ${holder.summary.runId} failed internally: ${error.message}`);
     return holder.finish("error");
   }
@@ -135,7 +136,7 @@ async function runPipeline({ task, cwd, request = {}, home = stateHome(), signal
   holder.finish = finish;
 
   if (!root) {
-    summary.warnings.push("not a git repository: Smart Delegate refuses to delegate without a git baseline");
+    summary.warnings.push(L("run.notGit"));
     return finish("refused");
   }
   if (decision.decision === "no-candidate") {
@@ -143,7 +144,7 @@ async function runPipeline({ task, cwd, request = {}, home = stateHome(), signal
     return finish("no-candidate");
   }
   if (decision.decision === "stay") {
-    summary.nextSteps.push("Do the task inline, or re-run with --force-delegate / --agent to delegate anyway.");
+    summary.nextSteps.push(L("run.doInline"));
     summary.warnings.push(...decision.reasons.slice(0, 1));
     return finish("not-delegated");
   }
@@ -169,7 +170,7 @@ async function runPipeline({ task, cwd, request = {}, home = stateHome(), signal
     preexistingDirty: Object.keys(baseline.dirty),
   });
   writeFileSync(join(runDir, "brief.md"), brief.text, { mode: 0o600 });
-  if (brief.redactions) summary.warnings.push(`${brief.redactions} secret-looking value(s) were redacted from the brief`);
+  if (brief.redactions) summary.warnings.push(L("run.redacted", { n: brief.redactions }));
   if (request.dryRun) {
     summary.brief = brief.text;
     summary.gates = gates;
@@ -233,7 +234,7 @@ async function runPipeline({ task, cwd, request = {}, home = stateHome(), signal
       notes: result.notes,
       policyViolation: result.policyViolation,
     });
-    if (result.policyViolation === true) summary.warnings.push(`${candidate.agent} did not run under the requested safety policy: ${result.notes.at(-1)}`);
+    if (result.policyViolation === true) summary.warnings.push(L("run.policyViolation", { agent: candidate.agent, note: result.notes.at(-1) }));
     final = result;
     finalCandidate = candidate;
     if (result.status === "completed") break;
@@ -246,7 +247,7 @@ async function runPipeline({ task, cwd, request = {}, home = stateHome(), signal
     }), home);
     if (!canFallback) {
       if (fallbackCanHelp(result.failure) && !clean) {
-        summary.warnings.push("fallback skipped: the failed attempt left changes in the working tree; inspect them before re-dispatching");
+        summary.warnings.push(L("run.fallbackSkipped"));
       }
       break;
     }
@@ -270,11 +271,11 @@ async function runPipeline({ task, cwd, request = {}, home = stateHome(), signal
     diffStat: diff.stat,
     diffPath: join(runDir, "diff.patch"),
   };
-  if (comparison.headChanged) summary.warnings.push(`HEAD moved during delegation (${comparison.headBefore} -> ${comparison.headAfter}): the worker committed or switched history`);
-  if (comparison.branchChanged) summary.warnings.push(`branch changed: ${comparison.branchBefore} -> ${comparison.branchAfter}`);
-  if (comparison.userFilesTouched.length) summary.warnings.push(`the worker modified files you had already changed: ${comparison.userFilesTouched.map((t) => t.path).join(", ")}`);
-  if (comparison.userChangesReverted.length) summary.warnings.push(`your pre-existing changes disappeared from: ${comparison.userChangesReverted.join(", ")}`);
-  if (outside.length) summary.warnings.push(`changes outside the declared scope: ${outside.join(", ")}`);
+  if (comparison.headChanged) summary.warnings.push(L("run.headMoved", { before: comparison.headBefore, after: comparison.headAfter }));
+  if (comparison.branchChanged) summary.warnings.push(L("run.branchChanged", { before: comparison.branchBefore, after: comparison.branchAfter }));
+  if (comparison.userFilesTouched.length) summary.warnings.push(L("run.userFilesTouched", { files: comparison.userFilesTouched.map((t) => t.path).join(", ") }));
+  if (comparison.userChangesReverted.length) summary.warnings.push(L("run.userChangesGone", { files: comparison.userChangesReverted.join(", ") }));
+  if (outside.length) summary.warnings.push(L("run.outOfScope", { files: outside.join(", ") }));
 
   const fallbackUsed = summary.attempts.length > 1;
   const recordFinal = (fields) => appendOutcome(attemptOutcome({
@@ -283,11 +284,11 @@ async function runPipeline({ task, cwd, request = {}, home = stateHome(), signal
   }), home);
 
   if (signal.aborted) {
-    summary.nextSteps.push("Aborted. Inspect the working tree before re-running; nothing was reverted.");
+    summary.nextSteps.push(L("run.aborted"));
     return finish("aborted");
   }
   if (final.status !== "completed") {
-    summary.nextSteps.push(`Inspect ${join(runDir, `attempt-${summary.attempts.length}`)} (stderr.txt, events.jsonl) and the working tree.`);
+    summary.nextSteps.push(L("run.inspectAttempt", { dir: join(runDir, `attempt-${summary.attempts.length}`) }));
     return finish("failed");
   }
 
@@ -297,20 +298,20 @@ async function runPipeline({ task, cwd, request = {}, home = stateHome(), signal
   // 5. Independent verification.
   let verification = { ran: false, passed: null, results: [] };
   if (request.skipVerification) {
-    summary.warnings.push("verification skipped by request; nothing is verified");
+    summary.warnings.push(L("run.verificationSkipped"));
   } else if (gates.length) {
     verification = await runGates(root, gates, { timeoutMs: parseDuration(config.execution.gateTimeout), outDir: runDir });
   } else {
-    summary.warnings.push("no verification gates found (configure verification.gates or pass --gate)");
+    summary.warnings.push(L("run.noGates"));
   }
   summary.verification = { ...verification, suggestions, workerClaimedPass: summary.attempts.at(-1).workerReport.claimsTestsPass };
   if (signal.aborted) {
     // An interrupted gate is not the model's fault: record nothing against it.
-    summary.nextSteps.push("Aborted during verification. The worker's changes are in the tree; re-run the gates yourself.");
+    summary.nextSteps.push(L("run.abortedGates"));
     return finish("aborted");
   }
   if (baselineGates?.passed === false && verification.passed === false) {
-    summary.warnings.push("gates were already failing before delegation (see baselineVerification)");
+    summary.warnings.push(L("run.gatesAlreadyFailing"));
   }
 
   // 6. Review.
@@ -319,13 +320,13 @@ async function runPipeline({ task, cwd, request = {}, home = stateHome(), signal
   if (workerPaths.length === 0 && writeExpected) {
     summary.review = { by: "none", verdict: null, note: "worker completed without changing any file" };
     recordFinal({ status: "no-changes", success: false, failureClass: FAILURE.QUALITY, testsPassed: verification.passed, reviewPassed: null });
-    summary.nextSteps.push("The worker reported completion but changed nothing. Read its report before retrying.");
+    summary.nextSteps.push(L("run.noChanges"));
     return finish("no-changes");
   }
   if (reviewBy === "independent" && verification.passed !== false && !integrityProblem) {
     summary.review = await independentReview({ prep, task, runDir, root, diff, verification, workerReport: final.finalMessage, timeoutMs, killGraceMs, request });
     reviewPassed = summary.review.verdict === "APPROVE" ? true : summary.review.verdict === "REQUEST_CHANGES" ? false : null;
-    if (summary.review.readOnlyViolation) summary.warnings.push("the reviewer changed files despite read-only mode; inspect the tree");
+    if (summary.review.readOnlyViolation) summary.warnings.push(L("run.reviewerWrote"));
   } else {
     summary.review = { by: reviewBy, verdict: null };
   }
@@ -350,11 +351,11 @@ async function runPipeline({ task, cwd, request = {}, home = stateHome(), signal
   const success = status === "verified" || status === "pending-review";
   recordFinal({ status, success, failureClass, testsPassed: verification.passed, reviewPassed });
 
-  if (status === "verified") summary.nextSteps.push("Gates pass. Read the diff, then commit it yourself (the worker never commits).");
-  if (status === "pending-review") summary.nextSteps.push(`Review ${summary.changes.diffPath}, then record the decision: smart-delegate outcome ${runId} --accept|--reject`);
-  if (status === "verification-failed") summary.nextSteps.push(`Gates failed. Resume the worker with a delta brief or fix inline; session: ${final.sessionId ?? "n/a"}`);
-  if (status === "changes-requested") summary.nextSteps.push("The independent reviewer requested changes; see review.findings.");
-  if (status === "needs-attention") summary.nextSteps.push("Git integrity problem (HEAD moved or your changes vanished). Inspect before doing anything else.");
+  if (status === "verified") summary.nextSteps.push(L("run.nextVerified"));
+  if (status === "pending-review") summary.nextSteps.push(L("run.nextPending", { diff: summary.changes.diffPath, runId }));
+  if (status === "verification-failed") summary.nextSteps.push(L("run.nextGatesFailed", { session: final.sessionId ?? "n/a" }));
+  if (status === "changes-requested") summary.nextSteps.push(L("run.nextChangesRequested"));
+  if (status === "needs-attention") summary.nextSteps.push(L("run.nextIntegrity"));
   return finish(status);
 }
 

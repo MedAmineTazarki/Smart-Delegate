@@ -1,6 +1,7 @@
 // Risk assessment from task text and repository reality.
 // risk = 1 - Π(1 - w_i) over matched risk signals, so several independent
 // signals compound without ever exceeding 1.
+import { L } from "../i18n/index.mjs";
 
 export const RISK_SIGNALS = [
   { name: "authentication", weight: 0.5, pattern: /\b(auth(?:entication|n)?|login|log-in|sign[- ]?in|oauth|sso|session tokens?|jwt|password|mot de passe|authentification)\b/i },
@@ -30,7 +31,7 @@ const AREA_TO_SIGNAL = [
  */
 export function assessRisk(text, repo, thresholds) {
   const matched = RISK_SIGNALS.filter((s) => s.pattern.test(text));
-  const reasons = matched.map((s) => `task mentions ${s.name}`);
+  const reasons = matched.map((s) => L("risk.mentions", { signal: s.name }));
   let factors = matched.map((s) => s.weight);
 
   // Repository reality: the task touches an area that exists and is sensitive.
@@ -45,12 +46,12 @@ export function assessRisk(text, repo, thresholds) {
   for (const signal of areaSignals) {
     if (matchedNames.has(signal)) {
       factors.push(0.15);
-      reasons.push(`repository has a ${signal} area the task touches`);
+      reasons.push(L("risk.area", { signal }));
     }
   }
   if (matchedNames.has("authentication") && areaSignals.has("database-migration")) {
     factors.push(0.15);
-    reasons.push("auth change in a repository with database migrations");
+    reasons.push(L("risk.authMigrations"));
   }
 
   // Every write carries some risk; baseline keeps the score meaningful.

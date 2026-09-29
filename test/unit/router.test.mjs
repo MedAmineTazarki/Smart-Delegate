@@ -4,6 +4,9 @@ import { builtinDefaults } from "../../src/config/config.mjs";
 import { profileTask } from "../../src/profiler/task.mjs";
 import { normalizeEntry } from "../../src/registry/registry.mjs";
 import { route } from "../../src/routing/router.mjs";
+import { setLang } from "../../src/i18n/index.mjs";
+
+setLang("en");
 import { explainRoute } from "../../src/routing/explain.mjs";
 import { validate, loadSchema } from "../../src/config/schema.mjs";
 import { discovered, entry } from "../helpers/env.mjs";

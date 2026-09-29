@@ -5,6 +5,7 @@
 import { SCHEMAS } from "../config/schema.mjs";
 import { clamp01, round } from "../utils/misc.mjs";
 import { assessRisk, riskLevelToScore } from "./risk.mjs";
+import { L } from "../i18n/index.mjs";
 
 export const CATEGORIES = [
   "architecture", "planning", "implementation", "feature", "bugfix", "debugging", "refactor",
@@ -92,7 +93,7 @@ export function profileTask(text, { repo = null, config, overrides = {} }) {
     const unknown = overrides.categories.filter((c) => !CATEGORIES.includes(c));
     if (unknown.length) throw Object.assign(new Error(`unknown task type(s): ${unknown.join(", ")} (known: ${CATEGORIES.join(", ")})`), { code: "SD_USAGE" });
     categories = [...overrides.categories];
-    reasons.push("task type set explicitly");
+    reasons.push(L("prof.typeExplicit"));
   } else {
     categories = CATEGORIES.filter((c) => CATEGORY_PATTERNS[c].test(text));
     // "implementation" is matched by generic verbs (add, write, create); a more
@@ -116,11 +117,11 @@ export function profileTask(text, { repo = null, config, overrides = {} }) {
   complexity += Math.min(0.15, Math.max(0, categories.length - 2) * 0.05);
   if (SIMPLER.test(text)) {
     complexity -= 0.2;
-    reasons.push("described as small/simple");
+    reasons.push(L("prof.simple"));
   }
   if (HARDER.test(text)) {
     complexity += 0.2;
-    reasons.push("described as large/complex");
+    reasons.push(L("prof.complex"));
   }
   if (text.length > 1500) complexity += 0.1;
 
@@ -130,17 +131,17 @@ export function profileTask(text, { repo = null, config, overrides = {} }) {
   if (files.length > 10) {
     complexity += 0.15;
     contextRequirement += 0.15;
-    reasons.push(`${files.length} files in scope`);
+    reasons.push(L("prof.scopeFiles", { n: files.length }));
   }
   if (repo) {
     if (repo.fileCount > 5000) {
       complexity += 0.1;
       contextRequirement += 0.15;
-      reasons.push(`large repository (${repo.fileCount} files)`);
+      reasons.push(L("prof.largeRepo", { n: repo.fileCount }));
     }
     if (repo.monorepo) {
       complexity += 0.05;
-      reasons.push("monorepo");
+      reasons.push(L("prof.monorepo"));
     }
   }
 
@@ -150,14 +151,14 @@ export function profileTask(text, { repo = null, config, overrides = {} }) {
     const r = typeof overrides.risk === "number" ? clamp01(overrides.risk) : riskLevelToScore(overrides.risk, thresholds);
     risk.score = r;
     risk.level = r >= thresholds.highThreshold ? "high" : r >= thresholds.mediumThreshold ? "medium" : "low";
-    risk.reasons.unshift("risk set explicitly");
+    risk.reasons.unshift(L("prof.riskExplicit"));
   }
   // Risky work is harder than it sounds.
   if (risk.level === "high") complexity += 0.1;
 
   if (overrides.complexity !== undefined && overrides.complexity !== null) {
     complexity = overrides.complexity;
-    reasons.push("complexity set explicitly");
+    reasons.push(L("prof.complexityExplicit"));
   }
   complexity = clamp01(complexity);
   contextRequirement = clamp01(contextRequirement);

@@ -18,11 +18,11 @@
     "node": ">=20"
   },
   "scripts": {
-    "test": "node --test --test-concurrency=4 \"test/**/*.test.mjs\"",
-    "test:unit": "node --test \"test/unit/**/*.test.mjs\"",
-    "test:contract": "node --test \"test/contract/**/*.test.mjs\"",
-    "test:integration": "node --test \"test/integration/**/*.test.mjs\"",
-    "test:e2e": "node --test \"test/e2e/**/*.test.mjs\"",
+    "test": "SMART_DELEGATE_LANG=en node --test --test-concurrency=4 \"test/**/*.test.mjs\"",
+    "test:unit": "SMART_DELEGATE_LANG=en node --test \"test/unit/**/*.test.mjs\"",
+    "test:contract": "SMART_DELEGATE_LANG=en node --test \"test/contract/**/*.test.mjs\"",
+    "test:integration": "SMART_DELEGATE_LANG=en node --test \"test/integration/**/*.test.mjs\"",
+    "test:e2e": "SMART_DELEGATE_LANG=en node --test \"test/e2e/**/*.test.mjs\"",
     "check": "node bin/smart-delegate.mjs doctor"
   }
 }

@@ -268,6 +268,20 @@ describe("e2e: smart-delegate CLI", () => {
     assert.equal(readFileSync(join(repo, "src/feature.txt"), "utf8"), "feature\n");
   });
 
+  it("French output for humans, English JSON contract", async () => {
+    const home = homeWithAgents({ claude: "success" });
+    const repo = makeRepo();
+    const fr = await runCli(["explain", TASK, "--lang", "fr"], { cwd: repo, home });
+    assert.match(fr.stdout, /Pourquoi :/);
+    assert.match(fr.stdout, /Écartés :/);
+    const env = await runCli(["route", TASK], { cwd: repo, home, env: { SMART_DELEGATE_LANG: "fr" } });
+    assert.match(env.stdout, /décision : déléguer/);
+    const json = await runCli(["route", TASK, "--json"], { cwd: repo, home, env: { SMART_DELEGATE_LANG: "fr" } });
+    assert.ok(json.json.reasons.some((r) => /task/.test(r)), "JSON reasons stay English");
+    const help = await runCli(["--help", "--lang", "fr"], { cwd: repo, home });
+    assert.match(help.stdout, /Commandes :/);
+  });
+
   it("dry run writes the brief without executing anything", async () => {
     const home = homeWithAgents({ claude: "edit" });
     const repo = makeRepo({ "AGENTS.md": "Use tabs.\n" });

@@ -13,6 +13,7 @@ import { SCHEMAS } from "../config/schema.mjs";
 import { healthFactor, localReliability } from "../history/ledger.mjs";
 import { UNKNOWN_CAPABILITY } from "../registry/registry.mjs";
 import { clamp01, round } from "../utils/misc.mjs";
+import { L } from "../i18n/index.mjs";
 
 export const MODES = ["auto", "quality", "balanced", "economy", "fast", "local-only"];
 const QUALITY_DIMS = ["quality", "reasoning", "reliability"];
@@ -112,7 +113,7 @@ export function route({ profile, config, entries, discovery, history = [], reque
   };
 
   if (request.noDelegate) {
-    return { ...base, decision: "stay", reasons: ["user asked not to delegate"] };
+    return { ...base, decision: "stay", reasons: [L("why.userNoDelegate")] };
   }
 
   // Candidate pool (manual override narrows it; unknown pairs become ad-hoc entries).
@@ -139,10 +140,10 @@ export function route({ profile, config, entries, discovery, history = [], reque
         enabled: true, status: "stable", local: false, contextWindow: null, vision: null, costTier: null,
         costPerTaskUsd: null, source: "manual-override", confidence: 0.1, capabilities: {}, taskFit: {}, effort: null,
       }];
-      warnings.push(`${override.agent}/${override.model} is not in the registry; routing it with unknown capabilities`);
+      warnings.push(L("warn.notInRegistry", { id: `${override.agent}/${override.model}` }));
     }
     if (pool.length === 0) {
-      return { ...base, decision: "no-candidate", reasons: [`no registry entry matches the override ${JSON.stringify(override)}`] };
+      return { ...base, decision: "no-candidate", reasons: [L("why.noOverrideMatch", { override: JSON.stringify(override) })] };
     }
   }
 
@@ -159,33 +160,33 @@ export function route({ profile, config, entries, discovery, history = [], reque
     const reject = (reason) => excluded.push({ id: entry.id, agent: entry.agent, model: entry.model, reason });
     const adapter = ADAPTERS.get(entry.agent);
     const agent = agentsById.get(entry.agent);
-    if (!adapter) { reject("no adapter for this agent"); continue; }
-    if (!agent?.installed) { reject("agent not installed"); continue; }
-    if (agent.enabled === false) { reject("agent disabled in config"); continue; }
-    if (excludeAgents.has(entry.agent) && !override) { reject("agent excluded"); continue; }
-    if (entry.provider && excludeProviders.has(entry.provider)) { reject(`provider ${entry.provider} excluded`); continue; }
-    if (!entry.enabled) { reject("model disabled"); continue; }
+    if (!adapter) { reject(L("ex.noAdapter")); continue; }
+    if (!agent?.installed) { reject(L("ex.notInstalled")); continue; }
+    if (agent.enabled === false) { reject(L("ex.agentDisabled")); continue; }
+    if (excludeAgents.has(entry.agent) && !override) { reject(L("ex.agentExcluded")); continue; }
+    if (entry.provider && excludeProviders.has(entry.provider)) { reject(L("ex.providerExcluded", { provider: entry.provider })); continue; }
+    if (!entry.enabled) { reject(L("ex.modelDisabled")); continue; }
     if (BLOCKING_STATUSES.has(entry.status)) {
-      if (!(override && entry.status === "deprecated")) { reject(`model status ${entry.status}`); continue; }
-      warnings.push(`${entry.id} is deprecated; used only because it was requested explicitly`);
+      if (!(override && entry.status === "deprecated")) { reject(L("ex.modelStatus", { status: entry.status })); continue; }
+      warnings.push(L("warn.deprecated", { id: entry.id }));
     }
     if (entry.status === "experimental" && !override && profile.risk > routing.experimentalMaxRisk) {
-      reject(`experimental model not allowed at risk ${profile.risk}`); continue;
+      reject(L("ex.experimentalRisk", { risk: profile.risk })); continue;
     }
-    if (mode === "local-only" && !entry.local) { reject("not a local model (local-only mode)"); continue; }
+    if (mode === "local-only" && !entry.local) { reject(L("ex.notLocal")); continue; }
     if (profile.visionRequirement > 0 && (entry.vision !== true || !adapter.capabilities.supportsImages)) {
-      reject("task needs vision; candidate has none (or unknown)"); continue;
+      reject(L("ex.noVision")); continue;
     }
-    if (profile.writeRequired && !adapter.capabilities.supportsWrite) { reject("task needs write access"); continue; }
+    if (profile.writeRequired && !adapter.capabilities.supportsWrite) { reject(L("ex.noWrite")); continue; }
     if (entry.contextWindow && entry.contextWindow < profile.requiredContextTokens) {
-      reject(`context window ${entry.contextWindow} < required ~${profile.requiredContextTokens}`); continue;
+      reject(L("ex.context", { window: entry.contextWindow, required: profile.requiredContextTokens })); continue;
     }
     if (maxCostTier !== null && entry.costTier !== null && entry.costTier > maxCostTier) {
-      reject(`cost tier ${entry.costTier} above budget tier ${maxCostTier}`); continue;
+      reject(L("ex.costTier", { tier: entry.costTier, max: maxCostTier })); continue;
     }
     if (maxUsd !== null) {
-      if (entry.costPerTaskUsd !== null && entry.costPerTaskUsd > maxUsd) { reject(`~$${entry.costPerTaskUsd}/task above budget $${maxUsd}`); continue; }
-      if (entry.costPerTaskUsd === null && config.budget?.strict) { reject("cost unknown under strict budget"); continue; }
+      if (entry.costPerTaskUsd !== null && entry.costPerTaskUsd > maxUsd) { reject(L("ex.costUsd", { cost: entry.costPerTaskUsd, max: maxUsd })); continue; }
+      if (entry.costPerTaskUsd === null && config.budget?.strict) { reject(L("ex.costUnknown")); continue; }
     }
 
     const learned = localReliability(entry, profile.taskType, history, config.learning);
@@ -195,13 +196,13 @@ export function route({ profile, config, entries, discovery, history = [], reque
       // A floor needs a real score: an unrated dimension is not "average".
       const unrated = Object.keys(floors).filter((dim) => typeof entry.capabilities[dim] !== "number");
       if (unrated.length) {
-        reject(`unrated for this task (no ${unrated.join(", ")} score); rate it in models.json or request it with --agent/--model`);
+        reject(L("ex.unrated", { dims: unrated.join(", ") }));
         continue;
       }
       const failed = Object.entries(floors).find(([dim, { min }]) => cap(effective, dim) < min);
       if (failed) {
         const [dim, { min, floor }] = failed;
-        reject(`below quality floor "${floor}": ${dim} ${round(cap(effective, dim), 2)} < ${min}`);
+        reject(L("ex.floor", { floor, dim: L(`dim.${dim}`), value: round(cap(effective, dim), 2), min }));
         continue;
       }
     }
@@ -254,7 +255,7 @@ export function route({ profile, config, entries, discovery, history = [], reque
     return {
       ...result,
       decision: "no-candidate",
-      reasons: [excluded.length ? "every candidate was filtered out (see excluded)" : "no candidates in the registry"],
+      reasons: [excluded.length ? L("why.allFiltered") : L("why.emptyRegistry")],
     };
   }
 
@@ -275,7 +276,7 @@ export function route({ profile, config, entries, discovery, history = [], reque
   const reasons = describe(primary, scored, profile);
   if (!override && !request.forceDelegate && profile.complexity < routing.minComplexityToDelegate) {
     decision = "stay";
-    reasons.unshift(`task looks trivial (complexity ${profile.complexity}); doing it inline is cheaper than delegating`);
+    reasons.unshift(L("why.trivial", { complexity: profile.complexity }));
   }
 
   return {
@@ -314,7 +315,7 @@ function reviewPlan({ primary, eligible, profile, config, weights }) {
   if (options.length === 0) {
     return {
       plan: { required: true, by: "orchestrator", agent: null, model: null },
-      warning: "high risk wants an independent reviewer but no other read-only-capable candidate is available; the orchestrator must review",
+      warning: L("warn.noReviewer"),
     };
   }
   const r = options[0].entry;
@@ -330,14 +331,8 @@ function confidence(primary, runnerUp, profile, request) {
   return round(0.35 * gapFactor + 0.35 * dataFactor + 0.3 * profileFactor, 2);
 }
 
-const DIM_LABEL = {
-  coding: "coding", reasoning: "reasoning", reliability: "reliability", quality: "quality",
-  architecture: "architecture", toolUse: "tool use", speed: "speed", costEfficiency: "cost efficiency",
-  taskFit: "task fit", contextFit: "context fit",
-};
-
 function describe(primary, scored, profile) {
-  const reasons = [`${profile.taskType} task (${profile.categories.join(", ")})`, `${profile.riskLevel} risk (${profile.risk})`];
+  const reasons = [L("why.taskType", { type: profile.taskType, categories: profile.categories.join(", ") }), L("why.risk", { level: L(`level.${profile.riskLevel}`), risk: profile.risk })];
   // Dimensions where the primary beats the field average by the most points.
   const avg = {};
   for (const dim of Object.keys(primary.breakdown)) {
@@ -348,10 +343,10 @@ function describe(primary, scored, profile) {
     .filter(([, delta]) => delta > 0.05)
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3);
-  for (const [dim] of strengths) reasons.push(`strong ${DIM_LABEL[dim] ?? dim} for this task`);
-  if (primary.breakdown.contextFit && primary.breakdown.contextFit.value >= UNKNOWN_CAPABILITY) reasons.push("required context supported");
-  if (primary.learned.applied) reasons.push(`local history: ${primary.learned.successes}/${primary.learned.n} accepted`);
-  if (primary.health.state !== "healthy") reasons.push(`health ${primary.health.state}`);
-  if (scored.length === 1) reasons.push("only compatible candidate");
+  for (const [dim] of strengths) reasons.push(L("why.strong", { dim: L(`dim.${dim}`) }));
+  if (primary.breakdown.contextFit && primary.breakdown.contextFit.value >= UNKNOWN_CAPABILITY) reasons.push(L("why.contextOk"));
+  if (primary.learned.applied) reasons.push(L("why.history", { successes: primary.learned.successes, n: primary.learned.n }));
+  if (primary.health.state !== "healthy") reasons.push(L("why.health", { state: primary.health.state }));
+  if (scored.length === 1) reasons.push(L("why.onlyOne"));
   return reasons;
 }

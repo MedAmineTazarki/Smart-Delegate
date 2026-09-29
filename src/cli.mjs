@@ -14,6 +14,7 @@ import { catalogUpdates, loadPiAi, locatePiAi, providerAuth } from "./catalog/pi
 import { terminateAll } from "./relay/process.mjs";
 import { candidateLabel, explainRoute } from "./routing/explain.mjs";
 import { ensureDir, readJson, writeJsonAtomic } from "./utils/fs.mjs";
+import { label, lang, setLang, t, tr } from "./i18n/index.mjs";
 import { log, setLogLevel } from "./utils/log.mjs";
 
 const VERSION = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")).version;
@@ -61,13 +62,61 @@ Run options:
   --baseline-gates      run gates before delegating too
   --dry-run             build the brief and plan, do not execute
 
-Global: --json  --cwd <dir>  --log-level <error|warn|info|debug|trace>  -h/--help  -v/--version
+Global: --json  --cwd <dir>  --log-level <error|warn|info|debug|trace>  --lang <en|fr>  -h/--help  -v/--version
+`;
+
+const HELP_FR = `smart-delegate ${VERSION} — confie une tâche de dev au meilleur agent + modèle disponible
+
+Usage : smart-delegate <commande> [options]
+
+Commandes :
+  setup                 crée ~/.smart-delegate et détecte les agents  (--project : ajoute .smart-delegate/config.json)
+  doctor                vérifie node, git, l'état, la config, le registre et les agents (auth comprise)
+  agents                liste les CLI d'agents installées
+  models                liste les candidats du registre  (--discover : demande aux CLI leurs vrais modèles, --save pour les enregistrer)
+                        --catalog : faits du catalogue pi-ai (contexte, vision, prix) et présence des clés ;
+                        --catalog --provider <id,...> --save : ajoute des candidats pour ces fournisseurs
+  route <tâche>         choisit l'agent principal, les replis et la relecture (sans exécuter)
+  explain <tâche>       route + explication lisible
+  run <tâche>           route, délègue, vérifie, relit, enregistre
+  history               derniers résultats  (--stats : agrégats par agent/modèle, --limit N)
+  outcome <runId>       enregistre ta décision finale : --accept | --reject [--reason texte]
+
+Tâche : texte en argument, ou --task-file <chemin>.
+
+Options de routage (route/explain/run) :
+  --mode <m>            auto | quality | balanced | economy | fast | local-only
+  --agent <id>          impose cet agent
+  --model <id>          impose ce modèle (fournisseur/modèle pour deepseek-harness et pi-agent)
+  --exclude-agent <id>  répétable       --exclude-provider <id>  répétable
+  --no-delegate         ne pas déléguer (décision « faire directement »)
+  --force-delegate      déléguer même si la tâche semble triviale
+  --type <a,b>          catégories de la tâche (au lieu de la détection par mots-clés)
+  --risk <low|medium|high|0..1>          --complexity <0..1>
+  --files <a,b>         chemins dans le périmètre (répétable)
+  --image <chemin>      image en entrée (répétable ; implique la vision)
+  --max-cost-tier <1-5> budget strict   --budget-usd <n>  budget strict par tâche
+  --registry <fichier>  couche de registre supplémentaire (priorité la plus haute)
+
+Options de run :
+  --timeout <durée>     délai max du worker (ex. 30m)
+  --gate "<cmd>"        commande de vérification, découpée sur les espaces (répétable)
+  --context-file <p>    contexte supplémentaire pour le brief
+  --requirement / --constraint / --acceptance <texte>  (répétables)
+  --review <qui>        none | orchestrator | independent   (par défaut : selon le risque)
+  --skip-verification   ne pas lancer les vérifications (le résultat n'est jamais « vérifié »)
+  --baseline-gates      lancer aussi les vérifications avant de déléguer
+  --dry-run             construit le brief et le plan, sans exécuter
+
+Global : --json  --cwd <dossier>  --log-level <error|warn|info|debug|trace>  --lang <en|fr>  -h/--help  -v/--version
+La sortie --json reste en anglais (contrat machine). Langue par défaut : SMART_DELEGATE_LANG, sinon ta locale.
 `;
 
 const OPTIONS = {
   json: { type: "boolean" },
   cwd: { type: "string" },
   "log-level": { type: "string" },
+  lang: { type: "string" },
   help: { type: "boolean", short: "h" },
   version: { type: "boolean", short: "v" },
   "task-file": { type: "string" },
@@ -178,8 +227,8 @@ function cmdAgents(ctx) {
   const d = discoverAgents(config);
   const lines = d.agents.map((a) =>
     a.installed
-      ? `${a.id.padEnd(13)} installed  ${a.version}  (${a.binaryPath}, via ${a.binarySource})${a.enabled ? "" : "  [disabled in config]"}`
-      : `${a.id.padEnd(13)} not found  (looked for: ${(a.tried ?? []).join(", ")})`,
+      ? `${a.id.padEnd(17)} ${t("cli.installed")}  ${a.version}  (${a.binaryPath}, via ${a.binarySource})${a.enabled ? "" : `  ${t("cli.disabledInConfig")}`}`
+      : `${a.id.padEnd(17)} ${t("cli.notFound")}  (${t("cli.lookedFor", { names: (a.tried ?? []).join(", ") })})`,
   );
   emit(ctx.json, d, lines.join("\n"));
   return EXIT.ok;
@@ -210,8 +259,8 @@ async function cmdModels(ctx) {
       const found = discoverModels(agent);
       const fresh = found.models.filter((m) => !known.has(`${agent.id}|${m}`));
       out.discovered.push({ agent: agent.id, source: found.source, error: found.error ?? null, models: found.models, notInRegistry: fresh });
-      lines.push("", `${agent.id}: ${found.error ? `discovery failed (${found.error})` : `${found.models.length} model(s) from ${found.source}`}`);
-      for (const m of fresh) lines.push(`  new: ${m}`);
+      lines.push("", found.error ? t("cli.discoveryFailed", { agent: agent.id, error: found.error }) : t("cli.discovered", { agent: agent.id, n: found.models.length, source: found.source }));
+      for (const m of fresh) lines.push(t("cli.newModel", { model: m }));
     }
     if (ctx.values.save) {
       // New models start experimental with unknown capabilities: they cannot
@@ -221,7 +270,7 @@ async function cmdModels(ctx) {
         source: `discovered: ${d.source}`, confidence: 0.1, capabilities: {},
       })));
       out.saved = saveUserEntries(entries);
-      lines.push("", `saved ${out.saved.added} new experimental entr${out.saved.added === 1 ? "y" : "ies"} to ${out.saved.path}`);
+      lines.push("", t("cli.savedExperimental", { n: out.saved.added, path: out.saved.path }));
     }
   }
   if (ctx.values.catalog) await catalogSection(ctx, { config, registry, discovery, out, lines });
@@ -235,7 +284,7 @@ async function catalogSection(ctx, { config, registry, discovery, out, lines }) 
   lines.push("");
   if (!where.dir) {
     out.catalog = { available: false, reason: where.source };
-    lines.push(`pi-ai catalog unavailable: ${where.source}. Install DeepSeek Harness (npm i -g @deepseek-ai/dsh) or set SMART_DELEGATE_PI_AI_DIR.`);
+    lines.push(t("cat.unavailable", { reason: where.source }));
     return;
   }
   const catalog = await loadPiAi(where.dir);
@@ -250,15 +299,15 @@ async function catalogSection(ctx, { config, registry, discovery, out, lines }) 
   const agents = discovery.agents.filter((a) => a.installed && ["deepseek-harness", "pi-agent"].includes(a.id)).map((a) => a.id);
   const { updates, skipped } = catalogUpdates({ entries: registry.entries, userEntries: readUserEntries(), catalog, providers: requested, observed, agents: agents.length ? agents : ["deepseek-harness"] });
   out.catalog = { available: true, version: catalog.version, dir: where.dir, source: where.source, providers: auth, updates, skipped };
-  lines.push(`pi-ai ${catalog.version} (${where.source}): ${auth.length} providers, ${auth.reduce((a, p) => a + p.models, 0)} models`);
-  for (const p of auth) lines.push(`  ${p.provider.padEnd(28)} ${String(p.models).padStart(4)} models  ${p.envKeys.length ? `key set: ${p.envKeys.join(", ")}` : "no key in env (a dsh sign-in may still exist)"}`);
+  lines.push(t("cat.summary", { version: catalog.version, source: where.source, providers: auth.length, models: auth.reduce((a, p) => a + p.models, 0) }));
+  for (const p of auth) lines.push(`  ${p.provider.padEnd(28)} ${String(p.models).padStart(4)} ${t("cat.models")}  ${p.envKeys.length ? t("cat.keySet", { keys: p.envKeys.join(", ") }) : t("cat.noKey")}`);
   const refreshed = updates.filter((u) => !u.agent).length;
   const added = updates.length - refreshed;
-  lines.push("", `${refreshed} existing entr${refreshed === 1 ? "y" : "ies"} with catalog facts, ${added} new harness candidate(s)${requested.length ? ` for ${requested.join(", ")}` : " (pass --provider to add candidates)"}`);
-  for (const s of skipped) lines.push(`  kept your value: ${s}`);
+  lines.push("", t("cat.updates", { refreshed, added }) + (requested.length ? t("cat.forProviders", { providers: requested.join(", ") }) : t("cat.passProvider")));
+  for (const s of skipped) lines.push(t("cat.kept", { field: s }));
   if (ctx.values.save) {
     out.saved = mergeUserEntries(updates);
-    lines.push(`saved to ${out.saved.path} (${out.saved.added} added, ${out.saved.updated} updated). New candidates are experimental and unrated: they run only when requested (--agent deepseek-harness --model <id>) until you rate them.`);
+    lines.push(t("cat.saved", { path: out.saved.path, added: out.saved.added, updated: out.saved.updated }));
   }
 }
 
@@ -272,12 +321,12 @@ function cmdRoute(ctx, { explain = false } = {}) {
   } else if (explain) {
     emit(false, null, explainRoute(r));
   } else {
-    const lines = [`decision: ${r.decision}`];
-    if (r.primary) lines.push(`primary:  ${candidateLabel(r.primary)}  (score ${r.primary.score}, confidence ${r.confidence})`);
-    for (const f of r.fallbacks) lines.push(`fallback: ${candidateLabel(f)}  (score ${f.score})`);
-    lines.push(`review:   ${r.review.by}${r.review.agent ? ` -> ${candidateLabel(r.review)}` : ""}`);
-    lines.push(`why:      ${r.reasons.join("; ")}`);
-    for (const w of r.warnings) lines.push(`warning:  ${w}`);
+    const lines = [t("cli.decision", { decision: label("decision", r.decision) })];
+    if (r.primary) lines.push(t("cli.primary", { candidate: candidateLabel(r.primary), score: r.primary.score, confidence: r.confidence }));
+    for (const f of r.fallbacks) lines.push(t("cli.fallback", { candidate: candidateLabel(f), score: f.score }));
+    lines.push(t("cli.review", { by: label("review", r.review.by), target: r.review.agent ? ` -> ${candidateLabel(r.review)}` : "" }));
+    lines.push(t("cli.why", { reasons: r.reasons.map((x) => tr(x)).join("; ") }));
+    for (const w of r.warnings) lines.push(t("cli.warning", { text: tr(w) }));
     emit(false, null, lines.join("\n"));
   }
   return r.decision === "no-candidate" ? EXIT.noCandidate : EXIT.ok;
@@ -299,23 +348,23 @@ async function cmdRun(ctx) {
   process.on("SIGTERM", onSignal);
   process.on("SIGHUP", onSignal);
   const summary = await runDelegation({ task, cwd: ctx.cwd, request: routingRequest(ctx.values), signal });
-  const lines = [`run ${summary.runId}: ${summary.status}`];
-  if (summary.route.primary) lines.push(`route: ${candidateLabel(summary.route.primary)} (score ${summary.route.primary.score})`);
+  const lines = [t("cli.runStatus", { runId: summary.runId, status: label("status", summary.status) })];
+  if (summary.route.primary) lines.push(t("cli.route", { candidate: candidateLabel(summary.route.primary), score: summary.route.primary.score }));
   for (const a of summary.attempts) {
-    lines.push(`attempt ${a.attempt}: ${candidateLabel(a.candidate)} -> ${a.status}${a.failure ? ` [${a.failure.class}: ${a.failure.reason}]` : ""}${a.durationMs ? ` in ${Math.round(a.durationMs / 1000)}s` : ""}`);
+    lines.push(t("cli.attempt", { n: a.attempt, candidate: candidateLabel(a.candidate), status: label("status", a.status), failure: a.failure ? ` [${a.failure.class}: ${a.failure.reason}]` : "", duration: a.durationMs ? ` (${Math.round(a.durationMs / 1000)} s)` : "" }));
   }
   if (summary.changes) {
-    lines.push(`worker changed ${summary.changes.workerChanges.length} file(s); your ${summary.changes.userChangesPreserved} pre-existing change(s) preserved`);
+    lines.push(t("cli.changed", { n: summary.changes.workerChanges.length, preserved: summary.changes.userChangesPreserved }));
     for (const c of summary.changes.workerChanges.slice(0, 30)) lines.push(`  ${c.kind.padEnd(9)} ${c.path}`);
   }
   if (summary.verification?.ran) {
-    for (const g of summary.verification.results) lines.push(`gate ${g.passed ? "PASS" : "FAIL"}: ${g.argv.join(" ")}`);
+    for (const g of summary.verification.results) lines.push(t("cli.gate", { result: g.passed ? "OK" : "KO", command: g.argv.join(" ") }));
   }
-  if (summary.review?.verdict) lines.push(`review (${summary.review.agent}): ${summary.review.verdict}`);
-  for (const w of summary.warnings) lines.push(`warning: ${w}`);
-  for (const s of summary.nextSteps) lines.push(`next: ${s}`);
+  if (summary.review?.verdict) lines.push(t("cli.reviewVerdict", { agent: summary.review.agent, verdict: summary.review.verdict }));
+  for (const w of summary.warnings) lines.push(t("cli.warning", { text: tr(w) }));
+  for (const s of summary.nextSteps) lines.push(t("cli.next", { text: tr(s) }));
   if (summary.brief) lines.push("", summary.brief);
-  lines.push(`artifacts: ${summary.runDir}`);
+  lines.push(t("cli.artifacts", { dir: summary.runDir }));
   emit(ctx.json, summary, lines.join("\n"));
   const ok = ["verified", "pending-review", "not-delegated", "dry-run"].includes(summary.status);
   if (summary.status === "no-candidate") return EXIT.noCandidate;
@@ -327,13 +376,13 @@ function cmdHistory(ctx) {
   const limit = ctx.values.limit ? Number(ctx.values.limit) : 20;
   if (ctx.values.stats) {
     const stats = aggregate(h.records);
-    const lines = stats.map((s) => `${`${s.agent}/${s.model ?? "(default)"}`.padEnd(30)} ${s.taskType.padEnd(16)} ${s.accepted}/${s.attempts} accepted  ${s.transient} transient`);
-    emit(ctx.json, { path: h.path, corruptLines: h.corruptLines, stats }, lines.join("\n") || "no history yet");
+    const lines = stats.map((s) => `${`${s.agent}/${s.model ?? "(default)"}`.padEnd(30)} ${s.taskType.padEnd(16)} ${t("cli.statsLine", { accepted: s.accepted, attempts: s.attempts, transient: s.transient })}`);
+    emit(ctx.json, { path: h.path, corruptLines: h.corruptLines, stats }, lines.join("\n") || t("cli.noHistory"));
     return EXIT.ok;
   }
   const recent = h.records.slice(-limit);
-  const lines = recent.map((r) => `${r.timestamp}  ${r.runId}  ${r.agent}/${r.model ?? "(default)"}  ${r.taskType}  ${r.status ?? (r.success ? "ok" : "failed")}${r.failureClass ? ` [${r.failureClass}]` : ""}`);
-  emit(ctx.json, { path: h.path, corruptLines: h.corruptLines, records: recent }, lines.join("\n") || "no history yet");
+  const lines = recent.map((r) => `${r.timestamp}  ${r.runId}  ${r.agent}/${r.model ?? "(default)"}  ${r.taskType}  ${label("status", r.status ?? (r.success ? "completed" : "failed"))}${r.failureClass ? ` [${r.failureClass}]` : ""}`);
+  emit(ctx.json, { path: h.path, corruptLines: h.corruptLines, records: recent }, lines.join("\n") || t("cli.noHistory"));
   return EXIT.ok;
 }
 
@@ -344,7 +393,7 @@ function cmdOutcome(ctx) {
   const h = readHistory();
   if (!h.records.some((r) => r.runId === runId)) throw usageError(`no history for run ${runId}`);
   const rec = appendOutcomeUpdate(runId, { accepted: Boolean(ctx.values.accept), reason: ctx.values.reason ?? null });
-  emit(ctx.json, rec, `recorded ${ctx.values.accept ? "accept" : "reject"} for ${runId}`);
+  emit(ctx.json, rec, t("cli.recorded", { decision: t(ctx.values.accept ? "cli.accept" : "cli.reject"), runId }));
   return EXIT.ok;
 }
 
@@ -367,10 +416,11 @@ function cmdSetup(ctx) {
       out.projectConfig = { path: p.config, created: false };
     }
   }
-  const lines = [`state: ${paths.home}`, `config: ${cfg.path}${cfg.created ? " (created)" : ""}`];
-  for (const a of out.agents) lines.push(`${a.id.padEnd(13)} ${a.installed ? `installed ${a.version}` : "not found"}`);
-  if (out.projectConfig) lines.push(`project config: ${out.projectConfig.path}${out.projectConfig.created ? " (created)" : ""}`);
-  if (!out.agents.some((a) => a.installed)) lines.push("No implementer CLI found. Install Claude Code, Codex or Command Code.");
+  const lines = [t("cli.state", { dir: paths.home }), t("cli.config", { path: cfg.path, created: cfg.created ? t("cli.created") : "" })];
+  for (const a of out.agents) lines.push(`${a.id.padEnd(17)} ${a.installed ? `${t("cli.installed")} ${a.version}` : t("cli.notFound")}`);
+  if (out.projectConfig) lines.push(t("cli.projectConfig", { path: out.projectConfig.path, created: out.projectConfig.created ? t("cli.created") : "" }));
+  if (!out.agents.some((a) => a.installed)) lines.push(t("cli.noAgent"));
+  lines.push(t("cli.lang"));
   emit(ctx.json, out, lines.join("\n"));
   return EXIT.ok;
 }
@@ -379,37 +429,37 @@ function cmdDoctor(ctx) {
   const checks = [];
   const check = (name, ok, detail, level = "error") => checks.push({ name, ok, level: ok ? "ok" : level, detail });
   const major = Number(process.versions.node.split(".")[0]);
-  check("node >= 20", major >= 20, process.version);
-  check("git available", gitAvailable(), gitAvailable() ? "ok" : "git not on PATH");
+  check(t("doc.node"), major >= 20, process.version);
+  check(t("doc.git"), gitAvailable(), gitAvailable() ? "ok" : t("doc.gitMissing"));
   const root = repoRoot(ctx.cwd);
-  check("inside a git repository", Boolean(root), root ?? `${ctx.cwd} is not a git work tree`, "warn");
+  check(t("doc.repo"), Boolean(root), root ?? t("doc.notRepo", { cwd: ctx.cwd }), "warn");
   const paths = statePaths();
-  check("state directory", existsSync(paths.home), existsSync(paths.home) ? paths.home : `${paths.home} missing (run smart-delegate setup)`, "warn");
+  check(t("doc.state"), existsSync(paths.home), existsSync(paths.home) ? paths.home : t("doc.stateMissing", { dir: paths.home }), "warn");
   let config = null;
   try {
     config = loadConfig({ repoRoot: root }).config;
-    check("config valid", true, "defaults + global + project layers load");
+    check(t("doc.config"), true, t("doc.configOk"));
   } catch (error) {
-    check("config valid", false, error.message);
+    check(t("doc.config"), false, error.message);
   }
   try {
     const reg = loadRegistry({ repoRoot: root });
-    check("registry valid", true, `${reg.entries.length} candidates from ${reg.sources.length} layer(s)`);
+    check(t("doc.registry"), true, t("doc.registryOk", { n: reg.entries.length, layers: reg.sources.length }));
   } catch (error) {
-    check("registry valid", false, error.message);
+    check(t("doc.registry"), false, error.message);
   }
   const h = readHistory();
-  check("history readable", h.corruptLines === 0, h.corruptLines ? `${h.corruptLines} corrupt line(s) in ${h.path} (skipped)` : `${h.records.length} record(s)`, "warn");
+  check(t("doc.history"), h.corruptLines === 0, h.corruptLines ? t("doc.historyCorrupt", { n: h.corruptLines, path: h.path }) : t("doc.historyOk", { n: h.records.length }), "warn");
   const agentsCache = readJson(paths.agents);
-  if (!agentsCache.ok && !agentsCache.missing) check("agents cache", false, `${paths.agents} is corrupt; re-run setup`, "warn");
+  if (!agentsCache.ok && !agentsCache.missing) check(t("doc.agentsCache"), false, t("doc.agentsCacheCorrupt", { path: paths.agents }), "warn");
   let agents = [];
   if (config) {
     agents = discoverAgents(config, { auth: true }).agents;
     for (const a of agents) {
-      if (!a.installed) check(`agent ${a.id}`, false, "not installed (optional)", "info");
-      else check(`agent ${a.id}`, a.authenticated !== false, `${a.version} at ${a.binaryPath}; auth: ${a.authenticated === null ? "unknown" : a.authenticated ? "ok" : "NOT authenticated"}`, "warn");
+      if (!a.installed) check(t("doc.agent", { id: a.id }), false, t("doc.agentMissing"), "info");
+      else check(t("doc.agent", { id: a.id }), a.authenticated !== false, t("doc.agentOk", { version: a.version, path: a.binaryPath, auth: t(a.authenticated === null ? "doc.authUnknown" : a.authenticated ? "doc.authOk" : "doc.authNo") }), "warn");
     }
-    check("at least one agent usable", agents.some((a) => a.installed && a.authenticated !== false), "install and log in to Claude Code, Codex or Command Code");
+    check(t("doc.usable"), agents.some((a) => a.installed && a.authenticated !== false), t("doc.usableHint"));
   }
   const failed = checks.filter((c) => !c.ok && c.level === "error");
   const out = { schema: SCHEMAS.doctor, healthy: failed.length === 0, checks, agents };
@@ -444,8 +494,9 @@ export async function main(argv) {
     return EXIT.ok;
   }
   const [command, ...rest] = positionals;
+  if (values.lang && ["en", "fr"].includes(values.lang)) setLang(values.lang);
   if (values.help || !command) {
-    process.stdout.write(HELP);
+    process.stdout.write(lang() === "fr" ? HELP_FR : HELP);
     return command || values.help ? EXIT.ok : EXIT.usage;
   }
   const handler = COMMANDS[command];
@@ -455,6 +506,7 @@ export async function main(argv) {
   }
   try {
     if (values["log-level"]) setLogLevel(values["log-level"]);
+    if (values.lang) setLang(values.lang);
     const ctx = { values, positionals: rest, json: Boolean(values.json), cwd: resolve(values.cwd ?? process.cwd()), home: stateHome() };
     return await handler(ctx);
   } catch (error) {

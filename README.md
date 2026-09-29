@@ -110,8 +110,13 @@ smart-delegate history --stats
 | `needs-attention` | HEAD moved or your uncommitted changes vanished. |
 | `not-delegated`, `no-candidate`, `refused`, `dry-run` | Nothing ran. |
 
+Human output is available in English and French. The language is chosen from `--lang fr`, then
+`SMART_DELEGATE_LANG=fr`, then your locale (`LANG=fr_FR...`). `smart-delegate --help --lang fr`
+shows the French help.
+
 Everything supports `--json`. stdout then carries exactly one JSON document (versioned schemas such as
-`smart-delegate.route.v1` and `smart-delegate.run.v1`), and diagnostics go to stderr.
+`smart-delegate.route.v1` and `smart-delegate.run.v1`), and diagnostics go to stderr. JSON always
+stays in English, whatever the language, because it is a machine contract.
 
 ## Routing modes
 
