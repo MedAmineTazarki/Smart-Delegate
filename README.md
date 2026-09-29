@@ -55,6 +55,7 @@ To use it from an agent, install the skills in `skills/` (for example, copy them
 | OpenAI Codex | `codex` | `-s workspace-write` (OS sandbox) | `-s read-only` (OS sandbox) | `exec resume <id>` | flags verified against `codex exec --help` 0.159.0; argv accepted by the real parser; **live task not yet run** |
 | Command Code | `command-code` / `commandcode` / `cmd` | `--yolo` (**no sandbox**) | `--permission-mode plan`, write tools withheld | `--resume` | flags verified against `cmd --help` 1.69.0; argv accepted by the real parser; **live task not yet run** |
 | DeepSeek Harness | `dsh` (`--profile headless --json`) | harness `workspace-write` sandbox + `approval never`, verified in the composed config before each run and in the session log after | harness `read-only` sandbox | `--session-id` | **real-binary verified** (0.2.0-rc.2) against a scripted mock model: write, sandboxed bash, read-only refusal; live provider run pending credentials |
+| Embedded pi-ai agent (`pi-agent`) | `node` + `src/pi-agent/agent.mjs`, pi-ai located from the dsh install | file tools realpath-confined to the repo (never `.git`/`.env*`); `bash` only inside `sandbox-exec` (macOS) or `bwrap` (Linux), with no network by default; no sandbox means no bash | no write, edit or shell tools | none | **real pi-ai verified** against a scripted mock (write, sandboxed bash, blocked escape); env API keys only; Linux `bwrap` unverified |
 
 DeepSeek Harness reaches providers through the same library the harness uses, `pi-ai`
 (`@earendil-works/pi-ai`, through `@deepseek-ai/dsh-llm-pi-ai`). Registry entries for it carry the
@@ -74,6 +75,11 @@ never reads them. Per run, Smart Delegate:
 A live run with a mock model and a logging proxy made no outbound connection at all. The run uses
 your real `~/.dsh` (or `agents.deepseek-harness.home`); the first run creates its `headless` profile
 there.
+
+The embedded `pi-agent` is Smart Delegate's own minimal agent loop on the same `pi-ai` library. It
+is useful for providers with an API key when you don't want the whole harness. Select it with
+`--agent pi-agent --model <provider>/<model>`, for example `--model zai/glm-4.7`. For local or
+self-hosted OpenAI-compatible servers, add `agents.pi-agent.customProviders`.
 
 Command Code is a harness. It can run many models (Kimi, GLM, Qwen, MiniMax, DeepSeek...), and each
 one it reports becomes its own candidate. Kimi Code and ZCode direct adapters are planned for V2

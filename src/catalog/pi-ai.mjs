@@ -97,13 +97,13 @@ const FACT_FIELDS = ["contextWindow", "vision", "costTier"];
  * A top-level fact is only written when the user has not set it themselves
  * (the user layer records which fields the catalog owns in facts.fields).
  */
-export function catalogUpdates({ entries, userEntries, catalog, providers = [], observed = {} }) {
+export function catalogUpdates({ entries, userEntries, catalog, providers = [], observed = {}, agents = ["deepseek-harness"] }) {
   const byCatalog = new Map();
   for (const [provider, models] of Object.entries(catalog.providers)) {
     for (const m of models) byCatalog.set(`${provider}|${m.id}`, m);
   }
   const findModel = (entry) => {
-    if (entry.agent === "deepseek-harness" && entry.provider && entry.model) return byCatalog.get(`${entry.provider}|${entry.model}`) ?? null;
+    if (agents.includes(entry.agent) && entry.provider && entry.model) return byCatalog.get(`${entry.provider}|${entry.model}`) ?? null;
     const id = entry.catalogId ?? observed[entry.id] ?? null;
     if (!id) return null;
     for (const [key, m] of byCatalog) if (key.endsWith(`|${id}`)) return m;
@@ -137,13 +137,13 @@ export function catalogUpdates({ entries, userEntries, catalog, providers = [], 
   }
 
   const existing = new Set(entries.map((e) => e.id));
-  for (const provider of providers) {
+  for (const agent of agents) for (const provider of providers) {
     for (const m of catalog.providers[provider] ?? []) {
-      const id = `deepseek-harness/${provider}/${m.id}`;
+      const id = `${agent}/${provider}/${m.id}`;
       if (existing.has(id)) continue;
       const facts = factsFor(m, catalog.version, retrievedAt);
       updates.push({
-        id, agent: "deepseek-harness", provider, model: m.id, enabled: true, status: "experimental",
+        id, agent, provider, model: m.id, enabled: true, status: "experimental",
         source: `catalog: pi-ai@${catalog.version}`, confidence: 0.1, capabilities: {},
         contextWindow: facts.contextWindow, vision: facts.vision, costTier: facts.costTier,
         facts: { ...facts, fields: FACT_FIELDS.filter((f) => facts[f] !== null) },

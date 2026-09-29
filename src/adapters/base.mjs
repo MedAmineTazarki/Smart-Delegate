@@ -110,13 +110,13 @@ export function defineAdapter(spec) {
 
   adapter.getCapabilities = () => ({ ...adapter.capabilities });
 
-  adapter.detect = (configuredBinary = null) => {
+  if (!spec.detect) adapter.detect = (configuredBinary = null) => {
     const resolved = resolveAdapterBinary(adapter, configuredBinary);
     if (!resolved.path) return { id: adapter.id, installed: false, binaryPath: null, source: resolved.source, tried: resolved.tried };
     return { id: adapter.id, installed: true, binaryPath: resolved.path, source: resolved.source };
   };
 
-  adapter.getVersion = (binaryPath) => {
+  if (!spec.getVersion) adapter.getVersion = (binaryPath) => {
     const r = probe(binaryPath, adapter.versionArgs, { env: childEnv(adapter) });
     if (!r.ok) return { version: null, error: r.error ?? `exit ${r.status}: ${(r.stderr || r.stdout).trim().slice(0, 200)}` };
     const text = `${r.stdout}\n${r.stderr}`.trim();
@@ -169,7 +169,12 @@ export function defineAdapter(spec) {
         return normalizeResult(adapter, req, { status: prepared.status ?? "failed", error: prepared.failure.reason, failure: prepared.failure, notes: prepared.notes ?? [] });
       }
     }
-    const command = adapter.buildCommand({ ...req, prepared });
+    let command;
+    try {
+      command = adapter.buildCommand({ ...req, prepared });
+    } catch (error) {
+      return normalizeResult(adapter, req, { status: "failed", error: error.message, failure: { class: "CAPABILITY", scope: "agent", reason: error.message } });
+    }
     const eventsPath = join(req.outDir, "events.jsonl");
     const stderrPath = join(req.outDir, "stderr.txt");
     const lines = [];

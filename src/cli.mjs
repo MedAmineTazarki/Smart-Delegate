@@ -246,7 +246,9 @@ async function catalogSection(ctx, { config, registry, discovery, out, lines }) 
   // Real model ids Claude Code reported for its aliases (never guessed).
   const observed = {};
   for (const r of readHistory().records) if (r.resolvedModel) observed[r.candidateId] = r.resolvedModel;
-  const { updates, skipped } = catalogUpdates({ entries: registry.entries, userEntries: readUserEntries(), catalog, providers: requested, observed });
+  // Candidates for every installed pi-ai-based agent (harness: sign-ins or env keys; embedded agent: env keys).
+  const agents = discovery.agents.filter((a) => a.installed && ["deepseek-harness", "pi-agent"].includes(a.id)).map((a) => a.id);
+  const { updates, skipped } = catalogUpdates({ entries: registry.entries, userEntries: readUserEntries(), catalog, providers: requested, observed, agents: agents.length ? agents : ["deepseek-harness"] });
   out.catalog = { available: true, version: catalog.version, dir: where.dir, source: where.source, providers: auth, updates, skipped };
   lines.push(`pi-ai ${catalog.version} (${where.source}): ${auth.length} providers, ${auth.reduce((a, p) => a + p.models, 0)} models`);
   for (const p of auth) lines.push(`  ${p.provider.padEnd(28)} ${String(p.models).padStart(4)} models  ${p.envKeys.length ? `key set: ${p.envKeys.join(", ")}` : "no key in env (a dsh sign-in may still exist)"}`);

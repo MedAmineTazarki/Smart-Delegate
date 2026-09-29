@@ -248,10 +248,24 @@ describe("e2e: smart-delegate CLI", () => {
     const saved = await runCli(["models", "--catalog", "--provider", "zai", "--save", "--json"], { cwd: repo, home, env });
     assert.equal(saved.json.saved.added, 1);
     const models = JSON.parse(readFileSync(join(home, "models.json"), "utf8")).models;
-    assert.equal(models[0].id, "deepseek-harness/zai/glm-x");
+    assert.equal(models[0].id, "pi-agent/zai/glm-x", "candidates target the installed pi-ai agent");
     assert.equal(models[0].contextWindow, 204800);
     const bad = await runCli(["models", "--catalog", "--provider", "nope", "--json"], { cwd: repo, home, env });
     assert.equal(bad.code, 2);
+  });
+
+  it("embedded pi-ai agent through the CLI: --agent pi-agent --model provider/model", async () => {
+    const home = homeWithAgents({});
+    const repo = makeRepo();
+    const env = {
+      SMART_DELEGATE_PI_AI_DIR: join(ROOT_DIR, "fixtures", "fake-pi-ai"),
+      FAKE_PI_SCRIPT: JSON.stringify([{ tool: "write_file", args: { path: "src/feature.txt", content: "feature\n" } }, { text: "STATUS: DONE" }]),
+    };
+    writeJson(join(home, "config.json"), { schema: "smart-delegate.config.v1", agents: { claude: { enabled: false }, codex: { enabled: false }, "command-code": { enabled: false }, "deepseek-harness": { enabled: false } } });
+    const r = await runCli(["run", TASK, "--json", "--agent", "pi-agent", "--model", "fake/m", ...PASSING_GATE], { cwd: repo, home, env });
+    assert.equal(r.json.status, "verified", JSON.stringify(r.json, null, 2));
+    assert.equal(r.json.attempts[0].candidate.provider, "fake");
+    assert.equal(readFileSync(join(repo, "src/feature.txt"), "utf8"), "feature\n");
   });
 
   it("dry run writes the brief without executing anything", async () => {

@@ -312,6 +312,15 @@
       "effort": null,
       "home": null,
       "declareRoutes": true
+    },
+    "pi-agent": {
+      "enabled": true,
+      "binary": null,
+      "effort": null,
+      "piAiDir": null,
+      "maxSteps": 60,
+      "shellNetwork": false,
+      "customProviders": []
     }
   },
   "exclude": {

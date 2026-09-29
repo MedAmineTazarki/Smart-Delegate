@@ -122,8 +122,20 @@ export function route({ profile, config, entries, discovery, history = [], reque
       (e) => (!override.agent || e.agent === override.agent) && (!override.model || e.model === override.model),
     );
     if (pool.length === 0 && override.agent && override.model) {
+      // Multi-model agents take "provider/model" (e.g. anthropic/claude-x).
+      const multi = ADAPTERS.get(override.agent)?.capabilities.multiModel === true;
+      const slash = override.model.indexOf("/");
+      const provider = multi && slash > 0 ? override.model.slice(0, slash) : null;
+      const model = provider ? override.model.slice(slash + 1) : override.model;
+      pool = entries.filter((e) => e.agent === override.agent && e.model === model && (!provider || e.provider === provider));
+    }
+    if (pool.length === 0 && override.agent && override.model) {
+      const multi = ADAPTERS.get(override.agent)?.capabilities.multiModel === true;
+      const slash = override.model.indexOf("/");
+      const provider = multi && slash > 0 ? override.model.slice(0, slash) : null;
+      const model = provider ? override.model.slice(slash + 1) : override.model;
       pool = [{
-        id: `${override.agent}/${override.model}`, agent: override.agent, model: override.model, provider: null,
+        id: `${override.agent}/${override.model}`, agent: override.agent, model, provider,
         enabled: true, status: "stable", local: false, contextWindow: null, vision: null, costTier: null,
         costPerTaskUsd: null, source: "manual-override", confidence: 0.1, capabilities: {}, taskFit: {}, effort: null,
       }];

@@ -13,7 +13,7 @@ export function discoverAgents(config, { auth = false } = {}) {
   const agents = [];
   for (const adapter of ADAPTERS.values()) {
     const agentConfig = config.agents?.[adapter.id] ?? {};
-    const detected = adapter.detect(agentConfig.binary ?? null);
+    const detected = adapter.detect(agentConfig.binary ?? null, { config, agents });
     const entry = {
       id: adapter.id,
       displayName: adapter.displayName,
@@ -28,8 +28,9 @@ export function discoverAgents(config, { auth = false } = {}) {
       capabilities: adapter.getCapabilities(),
     };
     if (!detected.installed) entry.tried = detected.tried;
+    if (detected.piAiDir) entry.piAiDir = detected.piAiDir;
     if (detected.installed) {
-      const v = adapter.getVersion(detected.binaryPath);
+      const v = adapter.getVersion(detected.binaryPath, detected);
       entry.version = v.version;
       entry.versionError = v.error;
       // A binary that cannot even report its version is not usable.

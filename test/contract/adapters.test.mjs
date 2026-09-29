@@ -13,6 +13,11 @@ import { fake, tempDir } from "../helpers/env.mjs";
 const BRIEF = "# Goal\n\nDo the thing; rm -rf / $(whoami) `id`\n";
 
 for (const adapter of ADAPTERS.values()) {
+  // Embedded agents are not vendor CLIs; they have their own contract suite.
+  if (adapter.embedded) {
+    it(`embedded adapter ${adapter.id} satisfies the contract`, () => assertAdapterContract(adapter));
+    continue;
+  }
   describe(`adapter contract: ${adapter.id}`, () => {
     it("satisfies the contract with truthful boolean capabilities", () => {
       assertAdapterContract(adapter);
