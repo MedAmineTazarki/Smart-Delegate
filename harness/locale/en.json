@@ -1,0 +1,1 @@
+{ "meta": { "title": "Smart Delegate", "description": "Routes engineering tasks to the best coding agent and model (Claude Code, Codex, Command Code, DeepSeek Harness, pi-ai) and delegates them with a git baseline, independent verification and review. Adds the smart_delegate tool and the /delegate command." } }

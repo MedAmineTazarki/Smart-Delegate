@@ -1,7 +1,7 @@
 {
   "name": "smart-delegate",
   "version": "0.1.0",
-  "description": "Data-driven router and safe delegation runtime for coding agents (Claude Code, Codex, Command Code, ...).",
+  "description": "Smart Delegate for DeepSeek Harness: route engineering tasks to the best coding agent + model and delegate them safely (dsh plugin + CLI).",
   "type": "module",
   "license": "MIT",
   "bin": {
@@ -12,6 +12,7 @@
     "src",
     "config",
     "skills",
+    "harness",
     "README.md"
   ],
   "engines": {
@@ -24,5 +25,16 @@
     "test:integration": "SMART_DELEGATE_LANG=en node --test \"test/integration/**/*.test.mjs\"",
     "test:e2e": "SMART_DELEGATE_LANG=en node --test \"test/e2e/**/*.test.mjs\"",
     "check": "node bin/smart-delegate.mjs doctor"
+  },
+  "icon": "./harness/icon.svg",
+  "exports": {
+    ".": "./harness/index.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./harness/locale/*.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./harness/cordis.patch.yml"
+    }
   }
 }

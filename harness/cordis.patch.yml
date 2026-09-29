@@ -1,0 +1,6 @@
+# Smart Delegate inside DeepSeek Harness: the `smart_delegate` tool and the
+# `/delegate` command. Optional config: `timeout` for delegated runs (e.g. 30m).
+- insert:
+    - id: smart-delegate
+      name: 'smart-delegate'
+      config: {}

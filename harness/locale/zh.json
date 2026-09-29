@@ -1,0 +1,1 @@
+{ "meta": { "title": "Smart Delegate", "description": "将工程任务路由到最合适的编码 agent 与模型（Claude Code、Codex、Command Code、DeepSeek Harness、pi-ai），并在 git 基线、独立验证与评审之下委派执行。提供 smart_delegate 工具与 /delegate 命令。" } }

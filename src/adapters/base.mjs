@@ -183,7 +183,9 @@ export function defineAdapter(spec) {
       command: req.binaryPath,
       args: command.args,
       cwd: req.cwd,
-      env: command.env ?? childEnv(adapter),
+      // Every worker is marked so a Smart Delegate plugin loaded inside it
+      // (e.g. a dsh worker) never delegates recursively.
+      env: { ...(command.env ?? childEnv(adapter)), SMART_DELEGATE_WORKER: "1" },
       input: command.stdin ?? null,
       timeoutMs: req.timeoutMs ?? null,
       killGraceMs: req.killGraceMs ?? 5000,

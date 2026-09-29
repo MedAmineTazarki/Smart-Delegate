@@ -338,6 +338,7 @@ function cmdRoute(ctx, { explain = false } = {}) {
 }
 
 async function cmdRun(ctx) {
+  if (process.env.SMART_DELEGATE_WORKER) throw usageError("refusing to delegate from inside a Smart Delegate worker (recursive delegation)");
   const task = taskText(ctx.values, ctx.positionals);
   const signal = { aborted: false };
   const onSignal = (sig) => {

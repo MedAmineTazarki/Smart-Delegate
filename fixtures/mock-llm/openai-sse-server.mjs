@@ -64,7 +64,15 @@ const server = createServer((req, res) => {
       res.writeHead(404).end();
       return;
     }
-    if (toolResults.length === 0 && writeTool) {
+    // MOCK_TOOL_CALL='{"name":"x","args":{...}}': call that tool first, then
+    // answer with the tool result so tests can read it from the final text.
+    const forced = process.env.MOCK_TOOL_CALL ? JSON.parse(process.env.MOCK_TOOL_CALL) : null;
+    if (forced && toolResults.length === 0 && tools.some((t) => (t.function?.name ?? t.name) === forced.name)) {
+      sse(res, toolCall(forced.name, forced.args ?? {}, "call_forced"));
+    } else if (forced) {
+      const text = toolResults.length ? `TOOL RESULT:\n${toolResults.at(-1).content}` : `TOOL ${forced.name} NOT OFFERED`;
+      sse(res, [base({ role: "assistant", content: text }), { ...base({}, "stop"), usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } }]);
+    } else if (toolResults.length === 0 && writeTool) {
       const params = JSON.stringify(tools.find((t) => (t.function?.name ?? t.name) === writeTool)?.function?.parameters ?? {});
       const pathKey = /"file_path"/.test(params) ? "file_path" : /"path"/.test(params) ? "path" : "file";
       sse(res, toolCall(writeTool, argsFor(tools, writeTool, { [pathKey]: process.env.MOCK_WRITE_PATH ?? "mock-output.txt", content: process.env.MOCK_WRITE_CONTENT ?? "written by mock\n" }), "call_write"));

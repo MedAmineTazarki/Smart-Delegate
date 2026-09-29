@@ -18,6 +18,48 @@ task -> profile -> discover agents -> registry -> hard filters -> scoring -> pri
      -> brief -> worker -> git attribution -> independent gates -> review -> ledger
 ```
 
+## Inside DeepSeek Harness (recommended)
+
+Smart Delegate installs into DeepSeek Harness as a plugin. The harness's own plugin mechanism is
+used, so no fork is needed.
+
+```bash
+dsh plugin --profile web add "/path/to/Smart Delegate"      # also works for other profiles
+```
+
+It adds two things:
+
+- **the `smart_delegate` tool for the dsh agent**, with these actions:
+  - `route` or `explain`: choose the best agent + model;
+  - `run`: delegate with a git baseline, independent verification and review;
+  - `history`: list recent delegations.
+- **the `/delegate` command for you**:
+  - `/delegate <task>`;
+  - `/delegate route <task>`;
+  - `/delegate history`;
+  - `/delegate accept|reject <runId>`. Accepting or rejecting stays with the user.
+
+Safety inside dsh:
+
+- **Approval.** `run` always goes through dsh's approval flow, and the approval reason is localized.
+  It is denied in a read-only session, and in headless mode, which has no one to answer the
+  approval.
+- **Child processes.** All work runs in a child process of the dsh host, and cancelling one call
+  stops only its own worker.
+- **Working directory.** The directory is always the session's own; the model cannot choose it.
+- **No recursion.** Workers carry `SMART_DELEGATE_WORKER=1`, so a dsh launched as a worker never
+  offers the tool again.
+
+Verified in the real `dsh` 0.2.0-rc.2:
+
+- installation;
+- the tool offered to the model;
+- a `route` call;
+- `run` refused without approval;
+- the tool absent inside a worker.
+
+The standalone CLI and the local web UI below remain available.
+
 ## Why it exists
 
 Model rankings change every few weeks, so hard-coding "architecture → model X" goes stale.
