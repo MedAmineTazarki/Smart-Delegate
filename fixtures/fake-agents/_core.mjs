@@ -43,6 +43,10 @@ const DSH_BASE = () => [
   { id: "sandbox-policy", name: "@deepseek-ai/dsh-sandbox-policy", config: { mode: "workspace-write" } },
   { id: "approval", name: "@deepseek-ai/dsh-user-approval", config: { policy: "ask" } },
   { id: "permission", name: "@deepseek-ai/dsh-permission-presets", config: { presets: { "workspace-write": { sandbox: "workspace-write", approval: "ask" } } } },
+  { id: "web", name: "@deepseek-ai/dsh-web" },
+  { id: "web-search-deepseek", name: "@deepseek-ai/dsh-web-search-deepseek" },
+  { id: "web-fetch-http", name: "@deepseek-ai/dsh-web-fetch-http" },
+  { id: "tool-web", name: "@deepseek-ai/dsh-tool-web" },
 ].filter((r) => r.id !== process.env.FAKE_DSH_DROP_ROW);
 
 function yamlish(value, indent) {

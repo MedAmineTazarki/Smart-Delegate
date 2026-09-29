@@ -205,6 +205,18 @@ describe("router", () => {
     assert.match(text, /Not selected:/);
   });
 
+  it("unrated candidates (e.g. catalog imports) are never auto-selected, even in economy mode", () => {
+    const imported = entry("deepseek-harness/zai/cheap", { agent: "deepseek-harness", provider: "zai", model: "cheap", costTier: 1, status: "stable", capabilities: {} });
+    const opus = entry("claude/opus", { model: "opus", costTier: 4 });
+    const r = decide("Improve the layout of the settings component", [imported, opus], { agents: ["claude", "deepseek-harness"], request: { mode: "economy" } });
+    assert.equal(r.primary.id, opus.id);
+    assert.match(r.excluded.find((e) => e.id === imported.id).reason, /unrated/);
+    const alone = decide("Improve the layout of the settings component", [imported], { agents: ["deepseek-harness"] });
+    assert.equal(alone.decision, "no-candidate");
+    const asked = decide("Improve the layout of the settings component", [imported, opus], { agents: ["claude", "deepseek-harness"], request: { agent: "deepseek-harness", model: "cheap" } });
+    assert.equal(asked.primary.id, imported.id, "explicit request still works");
+  });
+
   it("the router source never names a model or agent", async () => {
     const { readFileSync } = await import("node:fs");
     const src = readFileSync(new URL("../../src/routing/router.mjs", import.meta.url), "utf8").replace(/^\s*\/\/.*$/gm, "");

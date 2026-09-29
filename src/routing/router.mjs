@@ -192,6 +192,12 @@ export function route({ profile, config, entries, discovery, history = [], reque
     const effective = { ...entry, capabilities: { ...entry.capabilities, reliability: learned.reliability } };
 
     if (!override) {
+      // A floor needs a real score: an unrated dimension is not "average".
+      const unrated = Object.keys(floors).filter((dim) => typeof entry.capabilities[dim] !== "number");
+      if (unrated.length) {
+        reject(`unrated for this task (no ${unrated.join(", ")} score); rate it in models.json or request it with --agent/--model`);
+        continue;
+      }
       const failed = Object.entries(floors).find(([dim, { min }]) => cap(effective, dim) < min);
       if (failed) {
         const [dim, { min, floor }] = failed;

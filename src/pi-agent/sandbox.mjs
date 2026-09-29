@@ -6,7 +6,7 @@
 //   Linux: bubblewrap (bwrap) with the same shape. Implemented, not yet
 //          verified on a Linux machine.
 import { realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { whichBinary } from "../adapters/base.mjs";
 
@@ -24,8 +24,21 @@ export function detectShellSandbox() {
   return null;
 }
 
-export function macProfile(root, { network = false } = {}) {
+// Credential stores under $HOME the shell must never read.
+export const SECRET_HOME_PATHS = [
+  ".ssh", ".aws", ".gnupg", ".kube", ".docker", ".netrc", ".npmrc", ".pypirc", ".git-credentials",
+  ".config/gh", ".config/gcloud", ".dsh", ".smart-delegate", ".claude", ".codex", ".commandcode",
+  "Library/Keychains",
+];
+
+export function macProfile(root, { network = false, home = homedir() } = {}) {
   const tmp = realpathSync(tmpdir());
+  let realHome = home;
+  try {
+    realHome = realpathSync(home);
+  } catch {
+    // keep the given path
+  }
   return [
     "(version 1)",
     "(allow default)",
@@ -33,6 +46,9 @@ export function macProfile(root, { network = false } = {}) {
     "(deny file-write*)",
     `(allow file-write* (subpath ${sbpl(root)}) (subpath ${sbpl(tmp)}) (literal "/dev/null") (literal "/dev/tty") (regex #"^/dev/fd/"))`,
     `(deny file-write* (subpath ${sbpl(join(root, ".git"))}))`,
+    // Secrets: no .env files anywhere, no credential stores in $HOME.
+    '(deny file-read* (regex #"/\\.env(\\.[^/]*)?$"))',
+    `(deny file-read* ${SECRET_HOME_PATHS.map((p) => `(subpath ${sbpl(join(realHome, p))})`).join(" ")})`,
   ].join("\n");
 }
 
@@ -40,9 +56,9 @@ export function macProfile(root, { network = false } = {}) {
  * argv that runs `command` through bash inside the sandbox.
  * @returns {{ command: string, args: string[] }}
  */
-export function sandboxedShell(sandbox, root, command, { network = false } = {}) {
+export function sandboxedShell(sandbox, root, command, { network = false, home = homedir() } = {}) {
   if (sandbox.kind === "sandbox-exec") {
-    return { command: sandbox.path, args: ["-p", macProfile(root, { network }), "/bin/bash", "-c", command] };
+    return { command: sandbox.path, args: ["-p", macProfile(root, { network, home }), "/bin/bash", "-c", command] };
   }
   if (sandbox.kind === "bwrap") {
     return {

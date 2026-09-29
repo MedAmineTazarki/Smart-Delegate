@@ -2,7 +2,7 @@
 // Uses the scripted fake pi-ai fixture; a real-pi-ai run lives in
 // test/integration/pi-agent-real.test.mjs.
 import assert from "node:assert/strict";
-import { existsSync, readFileSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
 import piAgent from "../../src/adapters/pi-agent.mjs";
@@ -83,6 +83,23 @@ describe("pi-agent tools: repository confinement", () => {
     const home = join(process.env.HOME, `.sd-sandbox-probe-${process.pid}`);
     tools.bash.run({ command: `echo x > "${home}"` });
     assert.equal(existsSync(home), false, "writes outside the repository are blocked");
+  });
+
+  it("the real sandbox hides secrets: .env, credential stores, environment (macOS only)", { skip: detectShellSandbox()?.kind !== "sandbox-exec" && "no sandbox-exec" }, () => {
+    const r = makeRepo({ ".env": "API_TOKEN=repo-secret\n", "config/.env.local": "X=nested-secret\n" });
+    const fakeHome = tempDir("sd fake home ");
+    mkdirSync(join(fakeHome, ".ssh"));
+    writeFileSync(join(fakeHome, ".ssh", "id_probe"), "ssh-secret\n");
+    process.env.SD_PROBE_SECRET = "env-secret";
+    try {
+      const tools = buildTools({ root: r, readOnly: false, sandbox: detectShellSandbox(), home: fakeHome, Type });
+      const out = tools.bash.run({ command: `cat .env; cat config/.env.local; cat "${fakeHome}/.ssh/id_probe"; echo "[$SD_PROBE_SECRET]"; echo end` });
+      for (const secret of ["repo-secret", "nested-secret", "ssh-secret", "env-secret"]) assert.doesNotMatch(out, new RegExp(secret), `${secret} leaked:\n${out}`);
+      assert.match(out, /\[\]/);
+      assert.match(out, /end/);
+    } finally {
+      delete process.env.SD_PROBE_SECRET;
+    }
   });
 });
 

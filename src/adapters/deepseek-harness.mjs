@@ -16,6 +16,7 @@
 //     anything that would need a human is rejected; sandboxed bash still runs)
 //   session-log-deepseek disabled; session-telemetry-otel mode DISABLED plus
 //     DSH_TELEMETRY_DISABLED=1 (config alone cannot disable that row)
+//   web tools (web_fetch / web_search) disabled: no network channel for the model
 // Preflight: the real `--dump-config` must show every one of those values or
 // the run is refused (upstream row renames would otherwise silently restore
 // defaults). Post-run: the persisted session log must record the same policy.
@@ -27,6 +28,7 @@ import { probe } from "../relay/process.mjs";
 import { SAFE_TOKEN, childEnv, defineAdapter, parseJsonLine } from "./base.mjs";
 
 export const PRESET = "smart-delegate";
+export const WEB_ROWS = ["tool-web", "web", "web-search-deepseek", "web-fetch-http"];
 const ROUTE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 const DUMP_TIMEOUT_MS = 60_000;
 
@@ -61,6 +63,9 @@ export function buildPatch({ cwd, readOnly, provider, model, effort, declareRout
     { id: "permission", config: { presets: { [PRESET]: { sandbox, approval: "never" } }, defaultPreset: PRESET } },
     { id: "session-log-deepseek", disabled: true },
     { id: "session-telemetry-otel", config: { mode: "DISABLED", exporter: { url: "http://127.0.0.1:9/v1/logs" } } },
+    // No web access for delegated work: web_fetch reaches any public URL
+    // without approval (an exfiltration channel) and web_search calls an API.
+    ...WEB_ROWS.map((id) => ({ id, disabled: true })),
   ];
   if (model !== null) {
     rows.unshift({ id: "agent-default-model", config: { provider, model, ...(effort ? { reasoningEffort: effort } : {}) } });
@@ -96,6 +101,7 @@ export function verifyDump(dump, stderr, patch) {
   want("permission", "approval", "never");
   want("session-log-deepseek", "disabled", "true");
   want("session-telemetry-otel", "mode", "DISABLED");
+  for (const id of WEB_ROWS) want(id, "disabled", "true");
   const model = patch.find((r) => r.id === "agent-default-model");
   if (model) {
     want("agent-default-model", "provider", model.config.provider);

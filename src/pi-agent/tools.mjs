@@ -78,7 +78,14 @@ function walk(root, dir, out, limit) {
  * @param {boolean} [opts.network] shell network access
  * @param {object} opts.Type TypeBox builder exported by pi-ai
  */
-export function buildTools({ root, readOnly, sandbox, network = false, Type }) {
+// The shell gets a minimal environment: provider API keys and every other
+// secret in the agent's environment stay out of reach of model-run commands.
+const SHELL_ENV = ["PATH", "HOME", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "TMPDIR", "USER", "LOGNAME", "SHELL"];
+export function shellEnv(env = process.env) {
+  return Object.fromEntries(SHELL_ENV.filter((k) => env[k] !== undefined).map((k) => [k, env[k]]));
+}
+
+export function buildTools({ root, readOnly, sandbox, network = false, home, Type }) {
   const tools = {
     read_file: {
       description: "Read a UTF-8 text file in the repository. Optional 1-based line offset and line limit.",
@@ -158,11 +165,11 @@ export function buildTools({ root, readOnly, sandbox, network = false, Type }) {
   };
   if (sandbox) {
     tools.bash = {
-      description: `Run a shell command in the repository inside an OS sandbox (${sandbox.kind}): writes only inside the repository (not .git) and the temp dir${network ? "" : ", no network"}. 120s timeout.`,
+      description: `Run a shell command in the repository inside an OS sandbox (${sandbox.kind}): writes only inside the repository (not .git) and the temp dir${network ? "" : ", no network"}; .env files and credential stores are unreadable; minimal environment. 120s timeout.`,
       parameters: Type.Object({ command: Type.String() }),
       run({ command }) {
-        const { command: bin, args } = sandboxedShell(sandbox, root, command, { network });
-        const r = spawnSync(bin, args, { cwd: root, encoding: "utf8", timeout: 120_000, killSignal: "SIGKILL", maxBuffer: 8 * 1024 * 1024 });
+        const { command: bin, args } = sandboxedShell(sandbox, root, command, { network, ...(home ? { home } : {}) });
+        const r = spawnSync(bin, args, { cwd: root, env: shellEnv(), encoding: "utf8", timeout: 120_000, killSignal: "SIGKILL", maxBuffer: 8 * 1024 * 1024 });
         const out = `${r.stdout ?? ""}${r.stderr ? `\n[stderr]\n${r.stderr}` : ""}`;
         return clip(`exit ${r.status ?? r.signal ?? "?"}${r.error ? ` (${r.error.code ?? r.error.message})` : ""}\n${out}`);
       },

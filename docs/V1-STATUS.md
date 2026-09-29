@@ -7,7 +7,8 @@ Assessed on 2026-09-29, macOS (Darwin 25.6), Node 26.7, git 2.54.
 
 ## Evidence
 
-- `npm test`: **124 tests, 124 pass**, across unit, contract, integration and e2e.
+- `npm test`: **124 tests, 124 pass**, across unit, contract, integration and e2e, at the V1
+  release. The suite has since grown to 172 with the pi-ai integration (see PI-AI-INTEGRATION.md).
 - **Live runs against Claude Code 2.1.284:**
   - A write run (`--agent claude --model haiku`) in a throwaway repo:
     - the worker created 2 files;

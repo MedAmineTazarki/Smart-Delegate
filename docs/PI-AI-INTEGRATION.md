@@ -7,7 +7,7 @@ them adds a dependency: pi-ai is located from the harness installation (npm or p
 
 | Part | What | Credentials | Verified |
 | --- | --- | --- | --- |
-| 1. `deepseek-harness` agent | Runs `dsh --profile headless --json` with the provider and model set per run | dsh stored sign-ins (incl. Claude Pro/Max and ChatGPT/Codex OAuth) or env keys, all resolved by dsh | Real dsh 0.2.0-rc.2 with a scripted mock model: write, sandboxed bash, read-only refusal, policy recorded in the session log, no outbound connection |
+| 1. `deepseek-harness` agent | Runs `dsh --profile headless --json` with the provider and model set per run | dsh stored sign-ins or env keys, all resolved by dsh (subscription OAuth outside the vendor's client: check the vendor's terms) | Real dsh 0.2.0-rc.2 with a scripted mock model: write, sandboxed bash, read-only refusal, policy recorded in the session log, web tools absent from the tools the model is offered, no outbound connection during the scripted run |
 | 2. `models --catalog` | Imports pi-ai catalog **facts** (context window, image input, cost tier) and reports which provider key variables are set (names only) | none read | Real pi-ai 0.87.1 catalog (41 providers, 1495 models) |
 | 3. `pi-agent` | Smart Delegate's own tool loop on pi-ai, run as a child process | provider API keys from the environment only | Real pi-ai with a scripted mock: write, macOS-sandboxed bash, blocked escape |
 
@@ -25,6 +25,8 @@ The patch sets:
 - `session-log-deepseek`: disabled;
 - `session-telemetry-otel`: mode `DISABLED` and a dead local exporter. `DSH_TELEMETRY_DISABLED=1`
   is set too, because config alone cannot disable that row.
+- `tool-web`, `web`, `web-search-deepseek`, `web-fetch-http`: disabled. `web_fetch` reaches public
+  URLs without approval, which makes it an exfiltration channel.
 
 Before each run, the real `dsh --dump-config` must show every one of those values. A renamed
 upstream row, or a value that didn't apply, refuses the run with `POLICY`.
@@ -45,9 +47,21 @@ smart-delegate run "..." --agent deepseek-harness --model anthropic/claude-sonne
 smart-delegate run "..." --agent pi-agent --model zai/glm-4.7
 ```
 
-Imported candidates are `experimental` and unrated, with capabilities left unknown. The router will
-not choose them for real work until you rate them in `~/.smart-delegate/models.json`. Local history
-then adjusts them.
+Imported candidates are `experimental` and unrated, with capabilities left unknown. An unrated entry
+fails every quality floor, so the router never picks it automatically, in any mode, economy
+included. Rate it in `~/.smart-delegate/models.json`, or request it explicitly.
+
+## pi-agent shell sandbox (macOS, verified)
+
+The shell runs under `sandbox-exec` with these limits:
+
+- writes go only to the repository and the temp dir, never to `.git`;
+- network access is off unless `shellNetwork: true`;
+- `.env*` files are unreadable anywhere;
+- credential stores under `$HOME` are unreadable: `.ssh`, `.aws`, `.config/gh`, `.dsh`, `.claude`,
+  `.codex`, Keychains and others;
+- the environment is a minimal allowlist (`PATH`, `HOME`, locale, `TERM`, `TMPDIR`, `USER`), so
+  provider API keys never reach a command the model runs.
 
 ## Not done / not verified
 

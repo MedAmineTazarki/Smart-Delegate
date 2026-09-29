@@ -18,10 +18,11 @@ describe("real DeepSeek Harness", { skip }, () => {
   let mock;
   let port;
   const dshHome = tempDir("sd real dsh home ");
+  const mockLog = join(tempDir(), "mock.jsonl");
 
   before(async () => {
     mock = spawn(process.execPath, [join(ROOT, "fixtures/mock-llm/openai-sse-server.mjs")], {
-      env: { ...process.env, PORT: "0", MOCK_WRITE_PATH: "hello.txt", MOCK_BASH_COMMAND: "node -e \"require('fs').writeFileSync('bash-ran.txt','1')\"" },
+      env: { ...process.env, PORT: "0", MOCK_LOG: mockLog, MOCK_WRITE_PATH: "hello.txt", MOCK_BASH_COMMAND: "node -e \"require('fs').writeFileSync('bash-ran.txt','1')\"" },
       stdio: ["ignore", "pipe", "inherit"],
     });
     port = await new Promise((resolve) => mock.stdout.once("data", (d) => resolve(Number(String(d).split(" ")[1]))));
@@ -57,6 +58,10 @@ describe("real DeepSeek Harness", { skip }, () => {
     assert.equal(readFileSync(join(repo, "hello.txt"), "utf8"), "written by mock\n");
     assert.ok(existsSync(join(repo, "bash-ran.txt")), "sandboxed bash ran under approval never");
     assert.match(r.finalMessage, /STATUS: DONE/);
+    // Ground truth from the model's side: the tools pi-ai actually offered.
+    const offered = readFileSync(mockLog, "utf8").trim().split("\n").map((l) => JSON.parse(l)).find((e) => e.toolNames?.length).toolNames;
+    assert.ok(offered.includes("write") && offered.includes("bash"));
+    for (const t of ["web_fetch", "web_search"]) assert.ok(!offered.includes(t), `${t} offered to the model`);
   });
 
   it("read-only mode blocks the write", async () => {

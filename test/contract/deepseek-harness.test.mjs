@@ -59,6 +59,14 @@ describe("deepseek-harness adapter", () => {
     assert.ok(!off.notes.some((n) => /declared/.test(n)));
   });
 
+  it("web tools are disabled and verified (a renamed web row refuses the run)", async () => {
+    const r = await run({});
+    const patch = JSON.parse(readFileSync(join(r.artifacts.events, "..", "dsh-patch.json"), "utf8"));
+    for (const id of ["tool-web", "web", "web-search-deepseek", "web-fetch-http"]) assert.equal(patch.find((p) => p.id === id)?.disabled, true, id);
+    const renamed = await run({}, { FAKE_DSH_DROP_ROW: "tool-web" });
+    assert.equal(renamed.failure.class, "POLICY");
+  });
+
   it("refuses to run when an upstream row rename would drop a safety setting", async () => {
     const r = await run({}, { FAKE_DSH_DROP_ROW: "approval" });
     assert.equal(r.status, "failed");

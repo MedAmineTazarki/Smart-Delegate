@@ -65,10 +65,14 @@ pi-ai route in `provider` and the model id in `model`. Examples:
 - `{ "agent": "deepseek-harness", "provider": "openai-codex", "model": "gpt-5.5" }`
 
 Credentials come from the harness: `$DSH_HOME` stored sign-ins (made on the dsh Models page,
-including Claude Pro/Max and ChatGPT/Codex OAuth) or provider environment variables. Smart Delegate
+where pi-ai offers Claude Pro/Max and ChatGPT/Codex OAuth; whether a consumer subscription may be
+used outside its vendor's own client depends on that vendor's terms, which were not checked here) or
+provider environment variables. Smart Delegate
 never reads them. Per run, Smart Delegate:
 
 - turns off the harness's DeepSeek session-log upload and OTel;
+- turns off the harness's web tools (`web_fetch`, `web_search`), so the model has no network channel.
+  A real run confirms the model is no longer offered them;
 - confines writes to the repository;
 - sets approvals to `never`, so anything that would need a human is refused.
 
@@ -164,7 +168,9 @@ The shipped registry scores are **hand-set seed priors** (`"source": "manual-see
 not benchmarks. Model ids are limited to values verified against each CLI's help. Claude uses its
 documented aliases. Codex and Command Code use the agent's configured default (`model: null`) until
 `smart-delegate models --discover --save` imports the real ids they report. Imported ids start as
-`experimental`.
+`experimental`. An entry with no score for a dimension that a quality floor checks counts as
+**unrated**. Unrated entries are never picked automatically, in any mode; you can still select them
+explicitly.
 
 ### Model catalog (pi-ai)
 
@@ -293,3 +299,12 @@ The contract test suite then runs against it automatically.
 
 V1 is stable. See [docs/V1-STATUS.md](docs/V1-STATUS.md) for what is verified, the known limitations,
 and what moves to V2.
+
+The DeepSeek Harness / pi-ai integration came after V1:
+
+- the `deepseek-harness` agent;
+- `models --catalog`;
+- the embedded `pi-agent`.
+
+See [docs/PI-AI-INTEGRATION.md](docs/PI-AI-INTEGRATION.md). The test suite has 172 tests, plus
+real-binary integration tests that run when `dsh` is available.
