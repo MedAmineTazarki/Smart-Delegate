@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, it } from "node:test";
-import { entry, git, homeWithAgents, makeRepo, registryFile, runCli, tempDir, writeJson } from "../helpers/env.mjs";
+import { ROOT as ROOT_DIR, entry, git, homeWithAgents, makeRepo, registryFile, runCli, tempDir, writeJson } from "../helpers/env.mjs";
 
 const TASK = "Implement a CSV export feature for the reports page";
 const PASSING_GATE = ["--gate", "node -e process.exit(0)"];
@@ -235,6 +235,23 @@ describe("e2e: smart-delegate CLI", () => {
     });
     assert.equal(bad.json.status, "needs-attention");
     assert.ok(bad.json.warnings.some((w) => /safety policy/.test(w)));
+  });
+
+  it("models --catalog imports pi-ai facts and experimental harness candidates", async () => {
+    const home = homeWithAgents({ claude: "success" });
+    const repo = makeRepo();
+    const env = { SMART_DELEGATE_PI_AI_DIR: join(ROOT_DIR, "fixtures", "fake-pi-ai"), ZAI_API_KEY: "zai-secret-value" };
+    const list = await runCli(["models", "--catalog", "--json"], { cwd: repo, home, env });
+    assert.equal(list.json.catalog.available, true);
+    assert.deepEqual(list.json.catalog.providers.find((p) => p.provider === "zai").envKeys, ["ZAI_API_KEY"]);
+    assert.doesNotMatch(list.stdout, /zai-secret-value/);
+    const saved = await runCli(["models", "--catalog", "--provider", "zai", "--save", "--json"], { cwd: repo, home, env });
+    assert.equal(saved.json.saved.added, 1);
+    const models = JSON.parse(readFileSync(join(home, "models.json"), "utf8")).models;
+    assert.equal(models[0].id, "deepseek-harness/zai/glm-x");
+    assert.equal(models[0].contextWindow, 204800);
+    const bad = await runCli(["models", "--catalog", "--provider", "nope", "--json"], { cwd: repo, home, env });
+    assert.equal(bad.code, 2);
   });
 
   it("dry run writes the brief without executing anything", async () => {

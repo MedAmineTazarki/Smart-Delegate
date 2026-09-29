@@ -160,6 +160,21 @@ documented aliases. Codex and Command Code use the agent's configured default (`
 `smart-delegate models --discover --save` imports the real ids they report. Imported ids start as
 `experimental`.
 
+### Model catalog (pi-ai)
+
+`smart-delegate models --catalog` reads the `pi-ai` catalog installed with DeepSeek Harness, or the
+one pointed to by `SMART_DELEGATE_PI_AI_DIR`. It shows each provider, its model count, and which
+API-key variables are set. It reports names only and never reads values; stored dsh sign-ins are
+not inspected. `--provider anthropic,zai --save` then:
+
+- adds `deepseek-harness/<provider>/<model>` candidates with catalog **facts** (context window,
+  image input, cost tier from the output price, with source `pi-ai@<version>`), marked
+  `experimental` and unrated, so they run only when requested until you rate them;
+- refreshes facts on existing entries whose real model id is known. For Claude Code aliases, that
+  id comes from a model a run has actually reported, never from a guess.
+
+The import never overwrites a field you set yourself, and never imports quality scores.
+
 Useful project config:
 
 ```json

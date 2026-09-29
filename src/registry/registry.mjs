@@ -119,3 +119,41 @@ export function saveUserEntries(newEntries, home = stateHome()) {
     return { path: paths.models, added };
   });
 }
+
+/**
+ * Field-level merge into the user registry: patches update existing user
+ * entries (deep merge; `facts` replaced wholesale) or are added as partial
+ * overrides layered over built-in entries. Locked + atomic.
+ */
+export function mergeUserEntries(patches, home = stateHome()) {
+  const paths = statePaths(home);
+  return withLock(paths.lock, () => {
+    const read = readJson(paths.models);
+    if (!read.ok && !read.missing) {
+      throw Object.assign(new Error(`${paths.models} is corrupt (${read.error}); refusing to overwrite`), { code: "SD_REGISTRY" });
+    }
+    const current = read.ok ? read.value : { schema: SCHEMAS.registry, models: [] };
+    const byId = new Map(current.models.map((m) => [m.id, m]));
+    let added = 0;
+    let updated = 0;
+    for (const patch of patches) {
+      const prev = byId.get(patch.id);
+      if (prev) {
+        const { facts, ...rest } = patch;
+        byId.set(patch.id, { ...deepMerge(prev, rest), ...(facts ? { facts } : {}) });
+        updated += 1;
+      } else {
+        byId.set(patch.id, patch);
+        added += 1;
+      }
+    }
+    writeJsonAtomic(paths.models, { schema: SCHEMAS.registry, updatedAt: new Date().toISOString(), models: [...byId.values()] });
+    return { path: paths.models, added, updated };
+  });
+}
+
+/** Raw entries of the user layer (for "who set this field" decisions). */
+export function readUserEntries(home = stateHome()) {
+  const read = readJson(statePaths(home).models);
+  return read.ok ? read.value.models ?? [] : [];
+}

@@ -144,6 +144,7 @@ export default defineAdapter({
       finalMessage: typeof result.result === "string" ? result.result : lastAssistantText,
       usage: result.usage ?? null,
       costUsd: typeof result.total_cost_usd === "number" ? result.total_cost_usd : null,
+      resolvedModel: model,
       error: ok ? null : `result subtype ${result.subtype}${result.is_error ? " (is_error)" : ""}: ${String(result.result ?? "").slice(0, 300)}`,
       notes,
     };

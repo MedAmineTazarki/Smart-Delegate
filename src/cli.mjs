@@ -9,7 +9,8 @@ import { discoverAgents, discoverModels } from "./discovery/discovery.mjs";
 import { gitAvailable, repoRoot } from "./git/git.mjs";
 import { aggregate, appendOutcomeUpdate, readHistory } from "./history/ledger.mjs";
 import { prepareRouting, runDelegation } from "./orchestrator/delegate.mjs";
-import { loadRegistry, saveUserEntries } from "./registry/registry.mjs";
+import { loadRegistry, mergeUserEntries, readUserEntries, saveUserEntries } from "./registry/registry.mjs";
+import { catalogUpdates, loadPiAi, locatePiAi, providerAuth } from "./catalog/pi-ai.mjs";
 import { terminateAll } from "./relay/process.mjs";
 import { candidateLabel, explainRoute } from "./routing/explain.mjs";
 import { ensureDir, readJson, writeJsonAtomic } from "./utils/fs.mjs";
@@ -26,6 +27,8 @@ Commands:
   doctor                check node, git, state, config, registry, agents (incl. auth)
   agents                list implementer CLIs installed right now
   models                list registry candidates  (--discover: ask CLIs for real model ids, --save to record them)
+                        --catalog: pi-ai catalog facts (context, vision, price) and provider key presence;
+                        --catalog --provider <id,...> --save: add DeepSeek Harness candidates for those providers
   route <task>          choose primary, fallbacks and review policy (no execution)
   explain <task>        route + human-readable reasoning
   run <task>            route, delegate, verify, review, record
@@ -94,6 +97,8 @@ const OPTIONS = {
   "baseline-gates": { type: "boolean" },
   "dry-run": { type: "boolean" },
   discover: { type: "boolean" },
+  catalog: { type: "boolean" },
+  provider: { type: "string", multiple: true },
   save: { type: "boolean" },
   stats: { type: "boolean" },
   limit: { type: "string" },
@@ -180,7 +185,7 @@ function cmdAgents(ctx) {
   return EXIT.ok;
 }
 
-function cmdModels(ctx) {
+async function cmdModels(ctx) {
   const root = repoRoot(ctx.cwd);
   const { config } = loadConfig({ repoRoot: root });
   const registry = loadRegistry({ repoRoot: root, registryPath: ctx.values.registry ? resolve(ctx.values.registry) : null });
@@ -219,8 +224,40 @@ function cmdModels(ctx) {
       lines.push("", `saved ${out.saved.added} new experimental entr${out.saved.added === 1 ? "y" : "ies"} to ${out.saved.path}`);
     }
   }
+  if (ctx.values.catalog) await catalogSection(ctx, { config, registry, discovery, out, lines });
   emit(ctx.json, out, lines.join("\n"));
   return EXIT.ok;
+}
+
+async function catalogSection(ctx, { config, registry, discovery, out, lines }) {
+  const dsh = discovery.agents.find((a) => a.id === "deepseek-harness");
+  const where = locatePiAi({ config, dshBinary: dsh?.installed ? dsh.binaryPath : null });
+  lines.push("");
+  if (!where.dir) {
+    out.catalog = { available: false, reason: where.source };
+    lines.push(`pi-ai catalog unavailable: ${where.source}. Install DeepSeek Harness (npm i -g @deepseek-ai/dsh) or set SMART_DELEGATE_PI_AI_DIR.`);
+    return;
+  }
+  const catalog = await loadPiAi(where.dir);
+  const auth = providerAuth(catalog);
+  const requested = splitList(ctx.values.provider);
+  const unknown = requested.filter((p) => !(p in catalog.providers));
+  if (unknown.length) throw usageError(`unknown pi-ai provider(s): ${unknown.join(", ")} (see smart-delegate models --catalog)`);
+  // Real model ids Claude Code reported for its aliases (never guessed).
+  const observed = {};
+  for (const r of readHistory().records) if (r.resolvedModel) observed[r.candidateId] = r.resolvedModel;
+  const { updates, skipped } = catalogUpdates({ entries: registry.entries, userEntries: readUserEntries(), catalog, providers: requested, observed });
+  out.catalog = { available: true, version: catalog.version, dir: where.dir, source: where.source, providers: auth, updates, skipped };
+  lines.push(`pi-ai ${catalog.version} (${where.source}): ${auth.length} providers, ${auth.reduce((a, p) => a + p.models, 0)} models`);
+  for (const p of auth) lines.push(`  ${p.provider.padEnd(28)} ${String(p.models).padStart(4)} models  ${p.envKeys.length ? `key set: ${p.envKeys.join(", ")}` : "no key in env (a dsh sign-in may still exist)"}`);
+  const refreshed = updates.filter((u) => !u.agent).length;
+  const added = updates.length - refreshed;
+  lines.push("", `${refreshed} existing entr${refreshed === 1 ? "y" : "ies"} with catalog facts, ${added} new harness candidate(s)${requested.length ? ` for ${requested.join(", ")}` : " (pass --provider to add candidates)"}`);
+  for (const s of skipped) lines.push(`  kept your value: ${s}`);
+  if (ctx.values.save) {
+    out.saved = mergeUserEntries(updates);
+    lines.push(`saved to ${out.saved.path} (${out.saved.added} added, ${out.saved.updated} updated). New candidates are experimental and unrated: they run only when requested (--agent deepseek-harness --model <id>) until you rate them.`);
+  }
 }
 
 function cmdRoute(ctx, { explain = false } = {}) {
@@ -383,7 +420,7 @@ const COMMANDS = {
   setup: cmdSetup,
   doctor: cmdDoctor,
   agents: cmdAgents,
-  models: cmdModels,
+  models: (ctx) => cmdModels(ctx),
   route: (ctx) => cmdRoute(ctx),
   explain: (ctx) => cmdRoute(ctx, { explain: true }),
   run: cmdRun,

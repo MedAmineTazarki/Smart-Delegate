@@ -255,6 +255,7 @@ function normalizeResult(adapter, req, fields) {
     signal: fields.signal ?? null,
     sessionId: fields.sessionId ?? null,
     finalMessage: fields.finalMessage ?? "",
+    resolvedModel: fields.resolvedModel ?? null,
     usage: fields.usage ?? null,
     costUsd: fields.costUsd ?? null,
     durationMs: fields.durationMs ?? 0,

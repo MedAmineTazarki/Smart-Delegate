@@ -73,6 +73,7 @@ function attemptOutcome({ runId, root, prep, candidate, attempt, result, fallbac
     retryCount: attempt - 1,
     durationMs: result?.durationMs ?? null,
     estimatedCostUsd: result?.costUsd ?? null,
+    resolvedModel: result?.resolvedModel ?? null,
     ...fields,
   };
 }
