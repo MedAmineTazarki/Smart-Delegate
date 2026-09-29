@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "smart-delegate.outcome.v1",
+  "title": "One line of ~/.smart-delegate/history.jsonl. Never contains source code or brief text.",
+  "type": "object",
+  "required": ["schema", "runId", "timestamp", "taskType", "agent", "model", "success"],
+  "properties": {
+    "schema": { "const": "smart-delegate.outcome.v1" },
+    "runId": { "type": "string" },
+    "timestamp": { "type": "string" },
+    "repoId": { "type": ["string", "null"] },
+    "taskType": { "type": "string" },
+    "categories": { "type": "array", "items": { "type": "string" } },
+    "riskLevel": { "enum": ["low", "medium", "high"] },
+    "mode": { "type": "string" },
+    "candidateId": { "type": "string" },
+    "agent": { "type": "string" },
+    "model": { "type": ["string", "null"] },
+    "routeScore": { "type": ["number", "null"] },
+    "status": { "type": "string" },
+    "success": { "type": "boolean" },
+    "failureClass": { "type": ["string", "null"] },
+    "testsPassed": { "type": ["boolean", "null"] },
+    "reviewPassed": { "type": ["boolean", "null"] },
+    "fallbackUsed": { "type": "boolean" },
+    "attempt": { "type": "integer", "minimum": 1 },
+    "retryCount": { "type": "integer", "minimum": 0 },
+    "durationMs": { "type": ["integer", "null"] },
+    "estimatedCostUsd": { "type": ["number", "null"] },
+    "filesChanged": { "type": ["integer", "null"] }
+  }
+}

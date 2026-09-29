@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "smart-delegate.registry.v1",
+  "title": "Smart Delegate model registry (one agent + model pair per entry)",
+  "type": "object",
+  "required": ["schema", "models"],
+  "properties": {
+    "schema": { "const": "smart-delegate.registry.v1" },
+    "updatedAt": { "type": "string" },
+    "notes": { "type": "string" },
+    "models": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1 },
+          "agent": { "type": "string", "minLength": 1 },
+          "provider": { "type": ["string", "null"] },
+          "model": { "type": ["string", "null"] },
+          "enabled": { "type": "boolean" },
+          "status": { "enum": ["experimental", "stable", "degraded", "deprecated", "disabled", "unavailable"] },
+          "local": { "type": "boolean" },
+          "contextWindow": { "type": ["integer", "null"], "minimum": 0 },
+          "vision": { "type": ["boolean", "null"] },
+          "costTier": { "type": ["number", "null"], "minimum": 1, "maximum": 5 },
+          "costPerTaskUsd": { "type": ["number", "null"], "minimum": 0 },
+          "source": { "type": "string" },
+          "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+          "capabilities": {
+            "type": "object",
+            "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+          },
+          "taskFit": {
+            "type": "object",
+            "additionalProperties": { "type": "number", "minimum": 0, "maximum": 1 }
+          },
+          "effort": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+}

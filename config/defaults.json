@@ -1,0 +1,163 @@
+{
+  "schema": "smart-delegate.config.v1",
+  "routing": {
+    "defaultMode": "auto",
+    "maxCandidates": 3,
+    "minComplexityToDelegate": 0.15,
+    "weightProfiles": {
+      "implementation": {
+        "coding": 0.25,
+        "taskFit": 0.2,
+        "reliability": 0.15,
+        "quality": 0.15,
+        "toolUse": 0.1,
+        "contextFit": 0.05,
+        "costEfficiency": 0.05,
+        "speed": 0.05
+      },
+      "architecture": {
+        "reasoning": 0.3,
+        "quality": 0.25,
+        "reliability": 0.2,
+        "architecture": 0.15,
+        "contextFit": 0.05,
+        "costEfficiency": 0.03,
+        "speed": 0.02
+      },
+      "mechanical": {
+        "taskFit": 0.25,
+        "costEfficiency": 0.25,
+        "speed": 0.2,
+        "reliability": 0.2,
+        "quality": 0.1
+      },
+      "debugging": {
+        "reasoning": 0.25,
+        "coding": 0.2,
+        "taskFit": 0.15,
+        "reliability": 0.15,
+        "toolUse": 0.15,
+        "contextFit": 0.05,
+        "costEfficiency": 0.03,
+        "speed": 0.02
+      },
+      "review": {
+        "reasoning": 0.3,
+        "quality": 0.25,
+        "reliability": 0.25,
+        "taskFit": 0.1,
+        "contextFit": 0.05,
+        "costEfficiency": 0.05
+      },
+      "analysis": {
+        "reasoning": 0.25,
+        "contextFit": 0.2,
+        "taskFit": 0.2,
+        "quality": 0.15,
+        "reliability": 0.1,
+        "costEfficiency": 0.05,
+        "speed": 0.05
+      }
+    },
+    "categoryProfile": {
+      "architecture": "architecture",
+      "planning": "architecture",
+      "security": "architecture",
+      "migration": "architecture",
+      "infrastructure": "architecture",
+      "debugging": "debugging",
+      "bugfix": "debugging",
+      "performance": "debugging",
+      "review": "review",
+      "research": "analysis",
+      "repository-analysis": "analysis",
+      "large-context": "analysis",
+      "mechanical-edit": "mechanical",
+      "documentation": "mechanical",
+      "dependency-upgrade": "mechanical",
+      "tests": "implementation",
+      "implementation": "implementation",
+      "feature": "implementation",
+      "refactor": "implementation",
+      "ui": "implementation",
+      "vision": "implementation",
+      "devops": "implementation",
+      "database": "implementation"
+    },
+    "categoryDimensions": {
+      "implementation": { "coding": 0.7, "toolUse": 0.3 },
+      "feature": { "coding": 0.7, "toolUse": 0.3 },
+      "bugfix": { "coding": 0.5, "reasoning": 0.5 },
+      "debugging": { "reasoning": 0.6, "coding": 0.4 },
+      "refactor": { "coding": 0.6, "reasoning": 0.4 },
+      "migration": { "reasoning": 0.5, "reliability": 0.5 },
+      "tests": { "coding": 0.8, "toolUse": 0.2 },
+      "review": { "reasoning": 0.6, "quality": 0.4 },
+      "security": { "reasoning": 0.5, "reliability": 0.5 },
+      "performance": { "reasoning": 0.6, "coding": 0.4 },
+      "research": { "reasoning": 1 },
+      "documentation": { "quality": 1 },
+      "ui": { "coding": 1 },
+      "vision": { "coding": 1 },
+      "large-context": { "reasoning": 1 },
+      "repository-analysis": { "reasoning": 1 },
+      "devops": { "toolUse": 0.5, "coding": 0.5 },
+      "database": { "coding": 0.5, "reliability": 0.5 },
+      "infrastructure": { "reliability": 0.5, "reasoning": 0.5 },
+      "dependency-upgrade": { "toolUse": 0.5, "coding": 0.5 },
+      "mechanical-edit": { "coding": 1 },
+      "architecture": { "architecture": 0.6, "reasoning": 0.4 },
+      "planning": { "reasoning": 0.6, "architecture": 0.4 }
+    },
+    "modeMultipliers": {
+      "balanced": {},
+      "quality": { "quality": 2, "reasoning": 2, "reliability": 1.5, "costEfficiency": 0.25, "speed": 0.25 },
+      "fast": { "speed": 5, "costEfficiency": 0.5 },
+      "economy": { "costEfficiency": 4 },
+      "local-only": {}
+    },
+    "qualityFloors": [
+      { "name": "baseline", "when": {}, "require": { "coding": 0.5 } },
+      { "name": "simple-task", "when": { "anyCategory": ["tests", "mechanical-edit", "documentation"], "maxComplexity": 0.45 }, "require": { "coding": 0.6 } },
+      { "name": "feature", "when": { "anyCategory": ["implementation", "feature", "bugfix", "refactor", "migration", "database"], "minComplexity": 0.3 }, "require": { "coding": 0.78, "reliability": 0.75 } },
+      { "name": "architecture", "when": { "anyCategory": ["architecture"] }, "require": { "reasoning": 0.88 } },
+      { "name": "security", "when": { "anyCategory": ["security"] }, "require": { "reliability": 0.9 } },
+      { "name": "high-risk", "when": { "minRisk": 0.65 }, "require": { "reliability": 0.9, "reasoning": 0.85 } }
+    ],
+    "experimentalMaxRisk": 0.35
+  },
+  "risk": {
+    "mediumThreshold": 0.35,
+    "highThreshold": 0.65
+  },
+  "review": {
+    "low": "none",
+    "medium": "orchestrator",
+    "high": "independent"
+  },
+  "learning": {
+    "minSamples": 3,
+    "priorStrength": 10,
+    "influenceK": 20,
+    "maxReliabilityShift": 0.1
+  },
+  "health": {
+    "windowMinutes": 30,
+    "transientFailuresToDegrade": 2,
+    "degradedFactor": 0.6
+  },
+  "execution": {
+    "timeout": "30m",
+    "gateTimeout": "10m",
+    "killGraceMs": 5000,
+    "maxEventBytes": 67108864
+  },
+  "agents": {
+    "claude": { "enabled": true, "binary": null, "effort": null },
+    "codex": { "enabled": true, "binary": null, "effort": null },
+    "command-code": { "enabled": true, "binary": null, "effort": null }
+  },
+  "exclude": { "agents": [], "providers": [] },
+  "budget": { "maxCostTier": null, "maxUsdPerTask": null, "strict": false },
+  "verification": { "gates": [], "autoDiscover": true }
+}

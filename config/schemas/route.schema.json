@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "smart-delegate.route.v1",
+  "title": "Routing decision emitted by `smart-delegate route --json`",
+  "type": "object",
+  "required": ["schema", "decision", "mode", "profile", "primary", "fallbacks", "review", "confidence", "reasons"],
+  "properties": {
+    "schema": { "const": "smart-delegate.route.v1" },
+    "decision": { "enum": ["delegate", "stay", "no-candidate"] },
+    "mode": { "enum": ["auto", "quality", "balanced", "economy", "fast", "local-only"] },
+    "override": { "type": ["object", "null"] },
+    "profile": { "type": "object" },
+    "primary": {
+      "anyOf": [
+        { "type": "null" },
+        {
+          "type": "object",
+          "required": ["id", "agent", "model", "score"],
+          "properties": {
+            "id": { "type": "string" },
+            "agent": { "type": "string" },
+            "model": { "type": ["string", "null"] },
+            "provider": { "type": ["string", "null"] },
+            "score": { "type": "number" }
+          }
+        }
+      ]
+    },
+    "fallbacks": { "type": "array" },
+    "review": {
+      "type": "object",
+      "required": ["required", "by"],
+      "properties": {
+        "required": { "type": "boolean" },
+        "by": { "enum": ["none", "orchestrator", "independent"] },
+        "agent": { "type": ["string", "null"] },
+        "model": { "type": ["string", "null"] }
+      }
+    },
+    "confidence": { "type": "number", "minimum": 0, "maximum": 1 },
+    "reasons": { "type": "array", "items": { "type": "string" } },
+    "warnings": { "type": "array", "items": { "type": "string" } },
+    "excluded": { "type": "array" },
+    "ranked": { "type": "array" }
+  }
+}

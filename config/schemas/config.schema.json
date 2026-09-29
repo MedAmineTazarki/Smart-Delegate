@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "smart-delegate.config.v1",
+  "title": "Smart Delegate configuration layer (defaults, ~/.smart-delegate/config.json, .smart-delegate/config.json)",
+  "type": "object",
+  "properties": {
+    "schema": { "const": "smart-delegate.config.v1" },
+    "routing": {
+      "type": "object",
+      "properties": {
+        "defaultMode": { "enum": ["auto", "quality", "balanced", "economy", "fast", "local-only"] },
+        "maxCandidates": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "minComplexityToDelegate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "weightProfiles": { "type": "object" },
+        "categoryProfile": { "type": "object" },
+        "categoryDimensions": { "type": "object" },
+        "modeMultipliers": { "type": "object" },
+        "qualityFloors": { "type": "array" },
+        "experimentalMaxRisk": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "risk": { "type": "object" },
+    "review": {
+      "type": "object",
+      "properties": {
+        "low": { "enum": ["none", "orchestrator", "independent"] },
+        "medium": { "enum": ["none", "orchestrator", "independent"] },
+        "high": { "enum": ["none", "orchestrator", "independent"] }
+      }
+    },
+    "learning": { "type": "object" },
+    "health": { "type": "object" },
+    "execution": { "type": "object" },
+    "agents": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "enabled": { "type": "boolean" },
+          "binary": { "type": ["string", "null"] },
+          "effort": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "exclude": {
+      "type": "object",
+      "properties": {
+        "agents": { "type": "array", "items": { "type": "string" } },
+        "providers": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "properties": {
+        "maxCostTier": { "type": ["number", "null"] },
+        "maxUsdPerTask": { "type": ["number", "null"] },
+        "strict": { "type": "boolean" }
+      }
+    },
+    "verification": {
+      "type": "object",
+      "properties": {
+        "autoDiscover": { "type": "boolean" },
+        "gates": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "argv"],
+            "properties": {
+              "name": { "type": "string" },
+              "argv": { "type": "array", "items": { "type": "string" } }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "name": "smart-delegate",
+  "version": "0.1.0",
+  "description": "Data-driven router and safe delegation runtime for coding agents (Claude Code, Codex, Command Code, ...).",
+  "type": "module",
+  "license": "MIT",
+  "bin": {
+    "smart-delegate": "bin/smart-delegate.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "config",
+    "skills",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=4 \"test/**/*.test.mjs\"",
+    "test:unit": "node --test \"test/unit/**/*.test.mjs\"",
+    "test:contract": "node --test \"test/contract/**/*.test.mjs\"",
+    "test:integration": "node --test \"test/integration/**/*.test.mjs\"",
+    "test:e2e": "node --test \"test/e2e/**/*.test.mjs\"",
+    "check": "node bin/smart-delegate.mjs doctor"
+  }
+}
