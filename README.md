@@ -324,6 +324,10 @@ The contract test suite then runs against it automatically.
 V1 is stable. See [docs/V1-STATUS.md](docs/V1-STATUS.md) for what is verified, the known limitations,
 and what moves to V2.
 
+There is also a French language pack for DeepSeek Harness's own web UI (`dsh web`): a client
+plugin with 2,602 strings, installed with `dsh plugin add`, no fork needed. See
+[integrations/dsh-locale-fr](integrations/dsh-locale-fr/README.md).
+
 The DeepSeek Harness / pi-ai integration came after V1:
 
 - the `deepseek-harness` agent;

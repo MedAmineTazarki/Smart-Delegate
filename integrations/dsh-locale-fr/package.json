@@ -1,0 +1,13 @@
+{
+  "name": "@local/dsh-locale-fr",
+  "version": "0.1.0",
+  "description": "Français pour l'interface web de DeepSeek Harness (pack de langue, plugin client).",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "extract": "node --experimental-strip-types scripts/extract.mjs",
+    "check": "node scripts/build.mjs source/en-dicts.json --check",
+    "build": "node scripts/build.mjs source/en-dicts.json"
+  }
+}

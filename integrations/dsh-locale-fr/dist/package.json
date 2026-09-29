@@ -1,0 +1,25 @@
+{
+  "name": "@local/dsh-locale-fr",
+  "version": "0.1.0",
+  "description": "Français pour l'interface web de DeepSeek Harness (pack de langue, plugin client).",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale"
+      ]
+    }
+  }
+}

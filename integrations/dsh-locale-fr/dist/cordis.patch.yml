@@ -1,0 +1,3 @@
+- insert:
+    - id: locale-fr
+      name: '@local/dsh-locale-fr'
