@@ -99,6 +99,25 @@ smart-delegate outcome <runId> --accept                                # your re
 smart-delegate history --stats
 ```
 
+### Web UI (French/English)
+
+```bash
+smart-delegate ui            # opens http://127.0.0.1:3090/#token=... in your browser
+```
+
+The local dashboard has four parts:
+
+- a task form with routing analysis (decision, reasons, weights, filtered-out candidates);
+- runs, with live status, verification, warnings, the diff, and accept/reject for `pending-review`;
+- history and per-agent stats;
+- detected agents and the model registry.
+
+It starts in French and switches to English with one button.
+
+It only listens on `127.0.0.1` and needs the random token in the printed link, so other websites
+can't drive it. It also checks the Host and Origin headers and sends no CORS headers. Runs go
+through the same CLI pipeline, so every safeguard applies.
+
 `run` exits after the worker finishes and verification completes. Its `status` is one of:
 
 | Status | Meaning |

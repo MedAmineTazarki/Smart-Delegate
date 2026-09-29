@@ -155,6 +155,10 @@ const en = {
   "cat.passProvider": " (pass --provider to add candidates)",
   "cat.kept": "  kept your value: {field}",
   "cat.saved": "saved to {path} ({added} added, {updated} updated). New candidates are experimental and unrated: they run only when requested (--agent ... --model provider/model) until you rate them.",
+  "ui.errTask": "the task is empty",
+  "ui.errCwd": "folder not found: {dir}",
+  "ui.started": "Smart Delegate UI: {url}",
+  "ui.keep": "Keep this terminal open; Ctrl+C stops the UI. The link contains a private token: do not share it.",
 };
 
 const fr = {
@@ -302,6 +306,10 @@ const fr = {
   "cat.passProvider": " (passe --provider pour ajouter des candidats)",
   "cat.kept": "  valeur conservée (fixée par toi) : {field}",
   "cat.saved": "enregistré dans {path} ({added} ajoutée(s), {updated} mise(s) à jour). Les nouveaux candidats sont expérimentaux et non notés : ils ne tournent que sur demande (--agent ... --model fournisseur/modele) tant que tu ne les notes pas.",
+  "ui.errTask": "la tâche est vide",
+  "ui.errCwd": "dossier introuvable : {dir}",
+  "ui.started": "Interface Smart Delegate : {url}",
+  "ui.keep": "Garde ce terminal ouvert ; Ctrl+C arrête l'interface. Le lien contient un jeton privé : ne le partage pas.",
 };
 
 export const MESSAGES = { en, fr };

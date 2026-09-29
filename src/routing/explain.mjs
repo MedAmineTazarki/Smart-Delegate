@@ -1,11 +1,11 @@
 // Human-readable routing explanation (`smart-delegate explain`), localized.
 import { ADAPTERS } from "../adapters/index.mjs";
-import { label, t, tr } from "../i18n/index.mjs";
+import { label, lang, t, tr } from "../i18n/index.mjs";
 
-export function candidateLabel(c) {
+export function candidateLabel(c, language = lang()) {
   // Multi-model agents show provider/model so the pair is unambiguous.
   const multi = ADAPTERS.get(c.agent)?.capabilities.multiModel && c.provider;
-  return `${c.agent} / ${c.model ? (multi ? `${c.provider}/${c.model}` : c.model) : t("explain.defaultModel")}`;
+  return `${c.agent} / ${c.model ? (multi ? `${c.provider}/${c.model}` : c.model) : t("explain.defaultModel", {}, language)}`;
 }
 
 /** Compare a runner-up to the primary: where it wins and loses, in points. */
