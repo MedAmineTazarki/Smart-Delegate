@@ -23,15 +23,16 @@ for (const adapter of ADAPTERS.values()) {
     });
 
     it("keeps the brief on stdin, never on argv", () => {
-      const cmd = adapter.buildCommand({ brief: BRIEF, outDir: tempDir(), model: "some-model", readOnly: false });
+      const cmd = adapter.buildCommand({ brief: BRIEF, outDir: tempDir(), model: "some-model", provider: "some-provider", readOnly: false });
       assert.ok(cmd.stdin.includes("Do the thing"));
       assert.ok(!cmd.args.some((a) => a.includes("Do the thing")));
-      assert.ok(cmd.args.includes("some-model"));
+      assert.ok(JSON.stringify([cmd.args, cmd.meta ?? {}]).includes("some-model"), "model selected via argv or patch");
     });
 
     it("read-only and write modes produce different permission flags", () => {
-      const w = adapter.buildCommand({ brief: BRIEF, outDir: tempDir(), readOnly: false }).args.join(" ");
-      const r = adapter.buildCommand({ brief: BRIEF, outDir: tempDir(), readOnly: true }).args.join(" ");
+      const shape = (c) => JSON.stringify([c.args.map((a) => (a.endsWith("dsh-patch.json") ? "<patch>" : a)), c.meta ?? {}]);
+      const w = shape(adapter.buildCommand({ brief: BRIEF, outDir: tempDir(), readOnly: false }));
+      const r = shape(adapter.buildCommand({ brief: BRIEF, outDir: tempDir(), readOnly: true }));
       assert.notEqual(w, r);
     });
 

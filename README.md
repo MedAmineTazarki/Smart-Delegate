@@ -54,6 +54,26 @@ To use it from an agent, install the skills in `skills/` (for example, copy them
 | Claude Code | `claude` | `acceptEdits` + Claude shell sandbox + commit/push deny rules | `plan` mode, Read/Glob/Grep only | `--resume` | **live-verified** (2.1.284: write run, read-only run) |
 | OpenAI Codex | `codex` | `-s workspace-write` (OS sandbox) | `-s read-only` (OS sandbox) | `exec resume <id>` | flags verified against `codex exec --help` 0.159.0; argv accepted by the real parser; **live task not yet run** |
 | Command Code | `command-code` / `commandcode` / `cmd` | `--yolo` (**no sandbox**) | `--permission-mode plan`, write tools withheld | `--resume` | flags verified against `cmd --help` 1.69.0; argv accepted by the real parser; **live task not yet run** |
+| DeepSeek Harness | `dsh` (`--profile headless --json`) | harness `workspace-write` sandbox + `approval never`, verified in the composed config before each run and in the session log after | harness `read-only` sandbox | `--session-id` | **real-binary verified** (0.2.0-rc.2) against a scripted mock model: write, sandboxed bash, read-only refusal; live provider run pending credentials |
+
+DeepSeek Harness reaches providers through the same library the harness uses, `pi-ai`
+(`@earendil-works/pi-ai`, through `@deepseek-ai/dsh-llm-pi-ai`). Registry entries for it carry the
+pi-ai route in `provider` and the model id in `model`. Examples:
+
+- `{ "agent": "deepseek-harness", "provider": "anthropic", "model": "claude-sonnet-4-5" }`
+- `{ "agent": "deepseek-harness", "provider": "openai-codex", "model": "gpt-5.5" }`
+
+Credentials come from the harness: `$DSH_HOME` stored sign-ins (made on the dsh Models page,
+including Claude Pro/Max and ChatGPT/Codex OAuth) or provider environment variables. Smart Delegate
+never reads them. Per run, Smart Delegate:
+
+- turns off the harness's DeepSeek session-log upload and OTel;
+- confines writes to the repository;
+- sets approvals to `never`, so anything that would need a human is refused.
+
+A live run with a mock model and a logging proxy made no outbound connection at all. The run uses
+your real `~/.dsh` (or `agents.deepseek-harness.home`); the first run creates its `headless` profile
+there.
 
 Command Code is a harness. It can run many models (Kimi, GLM, Qwen, MiniMax, DeepSeek...), and each
 one it reports becomes its own candidate. Kimi Code and ZCode direct adapters are planned for V2

@@ -10,6 +10,9 @@ export const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 export const BIN = join(ROOT, "bin", "smart-delegate.mjs");
 export const FAKES = join(ROOT, "fixtures", "fake-agents");
 
+// Never let a test touch the real ~/.dsh: every harness run gets a throwaway home.
+process.env.DSH_HOME ??= realpathSync(mkdtempSync(join(tmpdir(), "sd dsh home ")));
+
 export const fake = (behavior) => join(FAKES, `fake-${behavior}-agent.mjs`);
 
 export function tempDir(prefix = "sd test ") {
@@ -51,7 +54,7 @@ export function writeJson(path, value) {
 export function homeWithAgents(agents) {
   const home = tempDir("sd home ");
   const config = { schema: "smart-delegate.config.v1", agents: {} };
-  for (const id of ["claude", "codex", "command-code"]) {
+  for (const id of ["claude", "codex", "command-code", "deepseek-harness"]) {
     config.agents[id] = agents[id] ? { enabled: true, binary: fake(agents[id]) } : { enabled: false, binary: "/nonexistent/agent" };
   }
   writeJson(join(home, "config.json"), config);
@@ -113,5 +116,5 @@ export function runCli(args, { cwd = ROOT, env = {}, home } = {}) {
 
 /** Discovery result stub for pure routing tests. */
 export function discovered(...ids) {
-  return { agents: ["claude", "codex", "command-code"].map((id) => ({ id, installed: ids.includes(id), enabled: true })) };
+  return { agents: ["claude", "codex", "command-code", "deepseek-harness"].map((id) => ({ id, installed: ids.includes(id), enabled: true })) };
 }

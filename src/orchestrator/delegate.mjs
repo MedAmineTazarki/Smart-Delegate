@@ -200,6 +200,8 @@ async function runPipeline({ task, cwd, request = {}, home = stateHome(), signal
       cwd: root,
       brief: brief.text,
       model: candidate.model,
+      provider: candidate.provider ?? null,
+      agentConfig: config.agents?.[candidate.agent] ?? {},
       effort: candidate.effort ?? null,
       readOnly: false,
       outDir: join(runDir, `attempt-${attempt}`),
@@ -227,12 +229,14 @@ async function runPipeline({ task, cwd, request = {}, home = stateHome(), signal
       changedFiles: comparison.workerChanges.length,
       artifacts: result.artifacts,
       notes: result.notes,
+      policyViolation: result.policyViolation,
     });
+    if (result.policyViolation === true) summary.warnings.push(`${candidate.agent} did not run under the requested safety policy: ${result.notes.at(-1)}`);
     final = result;
     finalCandidate = candidate;
     if (result.status === "completed") break;
 
-    const clean = comparison.workerChanges.length === 0 && comparison.userWorkSafe;
+    const clean = comparison.workerChanges.length === 0 && comparison.userWorkSafe && result.policyViolation !== true;
     const canFallback = fallbackCanHelp(result.failure) && clean && attempt < candidates.length && !signal.aborted;
     appendOutcome(attemptOutcome({
       runId, root, prep, candidate, attempt, result, fallbackUsed: attempt > 1,
@@ -286,7 +290,7 @@ async function runPipeline({ task, cwd, request = {}, home = stateHome(), signal
   }
 
   const writeExpected = profile.writeRequired;
-  const integrityProblem = comparison.headChanged || comparison.userChangesReverted.length > 0;
+  const integrityProblem = comparison.headChanged || comparison.userChangesReverted.length > 0 || summary.attempts.some((a) => a.policyViolation === true);
 
   // 5. Independent verification.
   let verification = { ran: false, passed: null, results: [] };
@@ -365,6 +369,8 @@ async function independentReview({ prep, task, runDir, root, diff, verification,
     cwd: root,
     brief: reviewBrief.text,
     model: plan.model,
+    provider: plan.provider ?? null,
+    agentConfig: prep.config.agents?.[plan.agent] ?? {},
     effort: plan.effort ?? null,
     readOnly: true,
     outDir: join(runDir, "review"),
@@ -381,7 +387,7 @@ async function independentReview({ prep, task, runDir, root, diff, verification,
     status: result.status,
     verdict,
     findings: result.finalMessage.slice(0, 4000),
-    readOnlyViolation: after.workerChanges.length > 0 || after.userFilesTouched.length > 0,
+    readOnlyViolation: after.workerChanges.length > 0 || after.userFilesTouched.length > 0 || result.policyViolation === true,
     error: result.error,
   };
 }

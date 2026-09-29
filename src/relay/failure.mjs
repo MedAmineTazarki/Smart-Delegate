@@ -24,7 +24,7 @@ const PATTERNS = [
   [FAILURE.TRANSIENT, "agent", new RegExp(String.raw`${HTTP}(?:429|5\d\d)\b|rate.?limit|too many requests|overloaded|internal server error|bad gateway|gateway time-?out|server error|service unavailable|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|network (?:error|failure)|socket hang up|temporarily unavailable`, "i")],
   [FAILURE.CAPABILITY, "agent", /context (?:length|window)|too many tokens|maximum context|prompt is too long|input too large|model .*not (?:supported|found|available)|unknown model|invalid model|unsupported (?:model|effort)/i],
   [FAILURE.POLICY, "agent", new RegExp(String.raw`insufficient (?:credits|quota|balance)|quota exceeded|billing|permission denied|access denied|forbidden|${HTTP}403\b|content policy|usage policy|refused`, "i")],
-  [FAILURE.ENVIRONMENT, "agent", new RegExp(String.raw`not (?:logged in|authenticated)|unauthori[sz]ed|${HTTP}401\b|login required|please (?:log ?in|run .*login)|invalid api key`, "i")],
+  [FAILURE.ENVIRONMENT, "agent", new RegExp(String.raw`NO_ADAPTER|MISSING_CREDENTIAL|provider is not configured|no adapter registered|not (?:logged in|authenticated)|unauthori[sz]ed|${HTTP}401\b|login required|please (?:log ?in|run .*login)|invalid api key`, "i")],
 ];
 
 /**

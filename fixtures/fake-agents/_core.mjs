@@ -20,6 +20,7 @@
 import { spawn } from "node:child_process";
 import { appendFileSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
+import zlib from "node:zlib";
 
 function readStdin() {
   try {
@@ -29,7 +30,66 @@ function readStdin() {
   }
 }
 
+// ---------------------------------------------------------------- dsh (DeepSeek Harness)
+// FAKE_DSH_ROUTES          comma list of pi-ai routes the user's config declares
+// FAKE_DSH_DROP_ROW        simulate an upstream rename: this base row is gone
+// FAKE_DSH_RECORDED_POLICY JSON {preset, sandbox, approval} to record instead of the patch's
+
+const DSH_BASE = () => [
+  { id: "agent-default-model", name: "@deepseek-ai/dsh-agent-default-model", config: { provider: "deepseek-official", model: "deepseek-flash" } },
+  { id: "session-log-deepseek", name: "@deepseek-ai/dsh-session-log-deepseek" },
+  { id: "llm-pi-ai", name: "@deepseek-ai/dsh-llm-pi-ai", config: process.env.FAKE_DSH_ROUTES ? { providers: Object.fromEntries(process.env.FAKE_DSH_ROUTES.split(",").map((r) => [r, { apiKeyEnv: "X" }])) } : undefined },
+  { id: "session-telemetry-otel", name: "@deepseek-ai/dsh-session-telemetry-otel", config: { mode: "FEEDBACK_ONLY" } },
+  { id: "sandbox-policy", name: "@deepseek-ai/dsh-sandbox-policy", config: { mode: "workspace-write" } },
+  { id: "approval", name: "@deepseek-ai/dsh-user-approval", config: { policy: "ask" } },
+  { id: "permission", name: "@deepseek-ai/dsh-permission-presets", config: { presets: { "workspace-write": { sandbox: "workspace-write", approval: "ask" } } } },
+].filter((r) => r.id !== process.env.FAKE_DSH_DROP_ROW);
+
+function yamlish(value, indent) {
+  const pad = " ".repeat(indent);
+  return Object.entries(value).map(([k, v]) => (v && typeof v === "object"
+    ? `${pad}${k}:${Object.keys(v).length ? `\n${yamlish(v, indent + 2)}` : " {}"}`
+    : `${pad}${k}: ${v}`)).join("\n");
+}
+
+function dshCompose(argv) {
+  const rows = DSH_BASE();
+  const i = argv.indexOf("--patch");
+  const patch = i === -1 ? [] : JSON.parse(readFileSync(argv[i + 1], "utf8"));
+  for (const p of patch) {
+    const row = rows.find((r) => r.id === p.id);
+    if (!row) {
+      process.stderr.write(`dsh: [${argv[i + 1]}] patch: entry "${p.id}" not found\n`);
+      continue;
+    }
+    if (p.disabled) row.disabled = true;
+    if (p.config) row.config = p.config;
+  }
+  return { rows, patch };
+}
+
+function dshDump(argv) {
+  const { rows } = dshCompose(argv);
+  const text = rows.map((r) => [`- id: ${r.id}`, `  name: '${r.name}'`, ...(r.disabled ? ["  disabled: true"] : []), ...(r.config ? ["  config:", yamlish(r.config, 4)] : [])].join("\n")).join("\n");
+  process.stdout.write(`${text}\n`);
+}
+
+function dshRecordSession(argv, sessionId) {
+  const { patch } = dshCompose(argv);
+  const sandbox = patch.find((r) => r.id === "sandbox-policy")?.config.mode ?? "workspace-write";
+  const policy = process.env.FAKE_DSH_RECORDED_POLICY ? JSON.parse(process.env.FAKE_DSH_RECORDED_POLICY) : { preset: "smart-delegate", sandbox, approval: "never" };
+  const events = [
+    { type: "permission/preset", seq: 0, data: { preset: policy.preset } },
+    { type: "sandbox/mode", seq: 1, data: { mode: policy.sandbox } },
+    { type: "approval/policy", seq: 2, data: { policy: policy.approval } },
+  ].map((e) => JSON.stringify(e)).join("\n");
+  const dir = join(process.env.DSH_HOME, "sessions", "--fake-cwd--", sessionId);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "session.v4.jsonl.zstd"), zlib.zstdCompressSync(Buffer.from(`${events}\n`)));
+}
+
 function detectFormat(argv) {
+  if (argv.includes("--profile") && argv.includes("headless")) return "dsh";
   if (argv[0] === "exec") return "codex";
   const i = argv.indexOf("--output-format");
   if (i !== -1 && argv[i + 1] === "stream-json") return "claude";
@@ -38,6 +98,7 @@ function detectFormat(argv) {
 }
 
 function isReadOnly(argv, format) {
+  if (format === "dsh") return dshCompose(argv).patch.some((r) => r.id === "sandbox-policy" && r.config?.mode === "read-only");
   if (format === "claude") return argv.includes("plan");
   if (format === "codex") return argv.includes("read-only");
   if (format === "command-code") return argv.includes("plan") && !argv.includes("--yolo");
@@ -47,7 +108,16 @@ function isReadOnly(argv, format) {
 const out = (obj) => process.stdout.write(`${JSON.stringify(obj)}\n`);
 
 function emitSuccess(format, argv, message) {
-  if (format === "claude") {
+  if (format === "dsh") {
+    const sessionId = "session-fake-dsh";
+    dshRecordSession(argv, sessionId);
+    out({ type: "session", sessionId, cwd: process.cwd() });
+    out({ type: "status", phase: "turn_start", turn: 1 });
+    out({ type: "status", phase: "step_end", turn: 1, step: 1, usage: { inputTokens: 10, outputTokens: 20 } });
+    out({ type: "text", text: message });
+    out({ type: "status", phase: "turn_end", turn: 1, reason: { kind: "completed" } });
+    out({ type: "final", text: message });
+  } else if (format === "claude") {
     out({ type: "system", subtype: "init", session_id: "fake-claude-session", model: "fake-model" });
     out({ type: "assistant", message: { content: [{ type: "text", text: message }] } });
     out({ type: "result", subtype: "success", is_error: false, result: message, session_id: "fake-claude-session", total_cost_usd: 0.0123, num_turns: 1, usage: { input_tokens: 10, output_tokens: 20 } });
@@ -70,7 +140,11 @@ function emitSuccess(format, argv, message) {
 
 function emitFailure(format, message) {
   process.stderr.write(`${message}\n`);
-  if (format === "claude") {
+  if (format === "dsh") {
+    out({ type: "session", sessionId: "session-fake-dsh" });
+    out({ type: "status", phase: "turn_end", turn: 1, reason: { kind: "error", error: { code: "PI_AI_ERROR", message } } });
+    out({ type: "final", text: "" });
+  } else if (format === "claude") {
     out({ type: "system", subtype: "init", session_id: "fake-claude-session" });
     out({ type: "result", subtype: "error_during_execution", is_error: true, result: message, session_id: "fake-claude-session" });
   } else if (format === "codex") {
@@ -102,6 +176,10 @@ export function runFake(behavior) {
   }
   if ((argv[0] === "auth" && argv[1] === "status") || (argv[0] === "login" && argv[1] === "status") || argv[0] === "status") {
     process.stdout.write(argv[0] === "auth" ? '{"loggedIn": true}\n' : "Logged in (Authenticated)\n");
+    return;
+  }
+  if (argv.includes("--dump-config")) {
+    dshDump(argv);
     return;
   }
   if (argv.includes("--list-models")) {

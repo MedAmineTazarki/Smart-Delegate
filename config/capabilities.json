@@ -146,6 +146,31 @@
         "toolUse": 0.82,
         "speed": 0.65
       }
+    },
+    {
+      "id": "deepseek-harness/default",
+      "agent": "deepseek-harness",
+      "provider": null,
+      "model": null,
+      "enabled": true,
+      "status": "experimental",
+      "local": false,
+      "contextWindow": null,
+      "vision": null,
+      "costTier": 1,
+      "costPerTaskUsd": null,
+      "source": "manual-seed",
+      "confidence": 0.1,
+      "notes": "The harness's own configured default model (agent-default-model row). Experimental until rated; import real provider/model pairs with `smart-delegate models --catalog`.",
+      "capabilities": {
+        "coding": 0.8,
+        "reasoning": 0.78,
+        "reliability": 0.78,
+        "quality": 0.76,
+        "architecture": 0.7,
+        "toolUse": 0.8,
+        "speed": 0.7
+      }
     }
   ]
 }

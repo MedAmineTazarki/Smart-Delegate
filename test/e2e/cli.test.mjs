@@ -220,6 +220,23 @@ describe("e2e: smart-delegate CLI", () => {
     assert.equal(doctor.json.healthy, true, JSON.stringify(doctor.json.checks, null, 2));
   });
 
+  it("DeepSeek Harness as an agent: provider/model routed through pi-ai, policy verified", async () => {
+    const home = homeWithAgents({ "deepseek-harness": "edit" });
+    const repo = makeRepo();
+    const reg = registryFile(tempDir(), [entry("deepseek-harness/anthropic/claude-x", { agent: "deepseek-harness", provider: "anthropic", model: "claude-x" })]);
+    const r = await runCli(["run", TASK, "--json", "--registry", reg, "--agent", "deepseek-harness", "--model", "claude-x", ...PASSING_GATE], { cwd: repo, home });
+    assert.equal(r.json.status, "verified", JSON.stringify(r.json, null, 2));
+    assert.equal(r.json.attempts[0].policyViolation, false);
+    const patch = JSON.parse(readFileSync(join(r.json.runDir, "attempt-1", "dsh-patch.json"), "utf8"));
+    assert.deepEqual(patch.find((p) => p.id === "agent-default-model").config, { provider: "anthropic", model: "claude-x" });
+
+    const bad = await runCli(["run", TASK, "--json", "--registry", reg, "--agent", "deepseek-harness", "--model", "claude-x", ...PASSING_GATE], {
+      cwd: makeRepo(), home, env: { FAKE_DSH_RECORDED_POLICY: JSON.stringify({ preset: "x", sandbox: "danger-full-access", approval: "never" }) },
+    });
+    assert.equal(bad.json.status, "needs-attention");
+    assert.ok(bad.json.warnings.some((w) => /safety policy/.test(w)));
+  });
+
   it("dry run writes the brief without executing anything", async () => {
     const home = homeWithAgents({ claude: "edit" });
     const repo = makeRepo({ "AGENTS.md": "Use tabs.\n" });

@@ -9,6 +9,9 @@
 //   buildCommand(request)         argv + stdin + env, never a shell string
 //   parseOutput(ctx)              raw events -> normalized fields
 //   classifyExit?(exitCode)       adapter-documented exit codes -> failure hint
+//   prepare?(req)                 async preflight -> { failure } | data passed to
+//                                 buildCommand as req.prepared
+//   verifyRun?(req, result)       post-run check -> { policyViolation, note }
 //
 // defineAdapter() adds the generic behaviour: detect(), getVersion(),
 // getCapabilities(), run(), resume().
@@ -157,7 +160,16 @@ export function defineAdapter(spec) {
         failure: { class: "CAPABILITY", scope: "agent", reason: "invalid model id" },
       });
     }
-    const command = adapter.buildCommand(req);
+    // Optional async preflight (e.g. verify a composed config). A failure here
+    // means the agent never started, so the tree is untouched.
+    let prepared = null;
+    if (adapter.prepare) {
+      prepared = await adapter.prepare(req);
+      if (prepared?.failure) {
+        return normalizeResult(adapter, req, { status: prepared.status ?? "failed", error: prepared.failure.reason, failure: prepared.failure, notes: prepared.notes ?? [] });
+      }
+    }
+    const command = adapter.buildCommand({ ...req, prepared });
     const eventsPath = join(req.outDir, "events.jsonl");
     const stderrPath = join(req.outDir, "stderr.txt");
     const lines = [];
@@ -198,8 +210,17 @@ export function defineAdapter(spec) {
         hint: proc.timedOut ? null : hint,
       });
     }
+    const notes = [...(prepared?.notes ?? []), ...(parsed.notes ?? [])];
+    let policyViolation = null;
+    if (adapter.verifyRun && !proc.spawnError) {
+      const check = adapter.verifyRun(req, { ...parsed, status });
+      policyViolation = check.policyViolation;
+      if (check.note) notes.push(check.note);
+    }
     return normalizeResult(adapter, req, {
       ...parsed,
+      notes,
+      policyViolation,
       status,
       exitCode: proc.exitCode,
       signal: proc.signal,
@@ -241,6 +262,7 @@ function normalizeResult(adapter, req, fields) {
     error: fields.error ?? null,
     failure: fields.failure ?? null,
     notes: fields.notes ?? [],
+    policyViolation: fields.policyViolation ?? null,
     command: fields.command ?? null,
     artifacts: fields.artifacts ?? null,
     stdoutTruncated: fields.stdoutTruncated ?? false,

@@ -300,7 +300,7 @@ function reviewPlan({ primary, eligible, profile, config, weights }) {
     };
   }
   const r = options[0].entry;
-  return { plan: { required: true, by: "independent", id: r.id, agent: r.agent, model: r.model, effort: r.effort ?? null } };
+  return { plan: { required: true, by: "independent", id: r.id, agent: r.agent, model: r.model, provider: r.provider ?? null, effort: r.effort ?? null } };
 }
 
 function confidence(primary, runnerUp, profile, request) {
