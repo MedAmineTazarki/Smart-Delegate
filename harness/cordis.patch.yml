@@ -1,6 +1,50 @@
-# Smart Delegate inside DeepSeek Harness: the `smart_delegate` tool and the
-# `/delegate` command. Optional config: `timeout` for delegated runs (e.g. 30m).
+# Smart Delegate inside DeepSeek Harness: the `smart_delegate` tool, the
+# `/delegate` command, and a composer-selectable Delegate mode.
+- id: preset-ptc
+  disabled: true
+- id: preset-minimal
+  disabled: true
+- id: preset-cordis
+  disabled: true
 - insert:
     - id: smart-delegate
       name: 'smart-delegate'
       config: {}
+    - id: preset-delegate
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: delegate
+        name: Delegate mode
+        description: Délègue le travail à des agents exécutants, examine leurs résultats et lance les vérifications nécessaires.
+        order: 2
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: |-
+                You are a coding agent operating in Delegate mode. For engineering work that changes files, use the smart_delegate tool with action "run" and a self-contained task brief. Smart Delegate chooses a worker, protects existing changes, runs verification, and returns the outcome. Use action "route" or "explain" when the user wants a routing decision without execution.
+
+                Read the worker's result and verification before reporting to the user. Do not claim a task succeeded when the run did not verify it. Do not record accept or reject on the user's behalf. You may inspect files and run focused shell checks; edit files yourself only when delegation is unavailable or clearly unreasonable for the task. Answer read-only questions directly.
+              suffix: Your working directory is {{cwd}}.
+          - id: agent-instructions
+            name: '@deepseek-ai/dsh-agent-instructions'
+            config:
+              maxBytes: 65536
+          - id: tool-bash
+            name: '@deepseek-ai/dsh-tool-bash'
+            disabled: !!js process.platform === 'win32'
+          - id: tool-pwsh
+            name: '@deepseek-ai/dsh-tool-pwsh'
+            disabled: !!js process.platform !== 'win32'
+          - id: tool-fs
+            name: '@deepseek-ai/dsh-tool-fs'
+          - id: tool-fs-search
+            name: '@deepseek-ai/dsh-tool-fs-search'
+            config:
+              sampleOverCapGlobResults: false
+          - id: tool-ask-user
+            name: '@deepseek-ai/dsh-tool-ask-user'
+          - id: tool-todo
+            name: '@deepseek-ai/dsh-tool-todo'
+            config:
+              allowParallelInProgress: true

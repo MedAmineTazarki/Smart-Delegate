@@ -2,6 +2,8 @@
 
 Smart Delegate is a data-driven router and safe delegation runtime for coding agents.
 
+The interface's visual direction and component rules are documented in [DESIGN.md](DESIGN.md).
+
 Give it an engineering task. It decides:
 
 - whether the task is worth delegating at all;
@@ -18,16 +20,41 @@ task -> profile -> discover agents -> registry -> hard filters -> scoring -> pri
      -> brief -> worker -> git attribution -> independent gates -> review -> ledger
 ```
 
-## Inside DeepSeek Harness (recommended)
+## Inside DeepSeek Harness (primary)
 
-Smart Delegate installs into DeepSeek Harness as a plugin. The harness's own plugin mechanism is
-used, so no fork is needed.
+DeepSeek Harness is the primary way to use Smart Delegate. It installs as a plugin through the
+harness's own plugin mechanism, so no fork is needed and there is no separate Smart Delegate web
+page or port: everything happens in the harness.
 
 ```bash
 dsh plugin --profile web add "/path/to/Smart Delegate"      # also works for other profiles
 ```
 
-It adds two things:
+Then open the harness (for the `web` profile, `dsh web`). Choose **Delegate mode** in the
+new-task mode menu to delegate ordinary prompts, or type `/delegate` in the composer.
+The mode menu offers **Standard mode** and **Delegate mode**. In Settings → General,
+the language selector offers English and Français.
+
+In **Settings → Providers**, search connected providers, choose one of the 42 providers in the
+installed Harness catalog, add its API key, or configure a custom endpoint and model IDs.
+Keys are stored in Harness' credential service, never in Smart Delegate config. Providers with
+an OAuth flow, such as OpenAI Codex, can be signed into on the same page; the official DeepSeek
+key remains available through its entry in **Settings → Providers**. **Settings → Delegation**
+shows the resulting model catalog and lets you create, enable, edit, or remove delegation lanes. Each lane selects an
+agent/model and optional task types. You can set a default lane, concurrent runs per session,
+an attempt time limit, and a correction limit. Settings are saved in Smart Delegate's global
+config; selecting a lane at the CLI is also possible with `--lane <id>`. A catalog entry does
+not itself prove that a provider is authenticated: finish its connection in Providers before
+running a lane. Custom pi-ai provider definitions and DeepSeek endpoint settings from the web
+profile are passed to the separate headless worker without copying API-key values.
+
+The plugin loads the runtime from this folder (`harness/index.js` runs `bin/smart-delegate.mjs`),
+so keep the folder in place after installing.
+
+It adds three ways to delegate:
+
+- **Delegate mode** in the new-task mode menu. It uses `smart_delegate` for engineering work,
+  inspects the result and reports its verification. Standard mode remains available.
 
 - **the `smart_delegate` tool for the dsh agent**, with these actions:
   - `route` or `explain`: choose the best agent + model;
@@ -58,7 +85,7 @@ Verified in the real `dsh` 0.2.0-rc.2:
 - `run` refused without approval;
 - the tool absent inside a worker.
 
-The standalone CLI and the local web UI below remain available.
+The standalone CLI below remains available for scripts and other agents.
 
 ## Why it exists
 
@@ -141,26 +168,9 @@ smart-delegate outcome <runId> --accept                                # your re
 smart-delegate history --stats
 ```
 
-### Web UI (French/English)
+`run` exits after the worker finishes and verification completes. If an independently run gate fails or an independent reviewer explicitly requests changes, it asks the **same implementer** for one correction (resuming its session when supported, otherwise rerunning with an explicit delta brief), then reinspects the original Git baseline, reruns the same gates and review, and stops after that round. Unsafe edits, reviewer writes, cancellation, and failed workers never trigger correction. The JSON `corrections` array lists each round's reason, brief/result paths, inspection, verification, and review; `initialAssessment` retains the first failed checks. Artifacts live under `correction-1/` in the run directory. A correction is not a fallback, does not clean or commit, and never accepts on your behalf.
 
-```bash
-smart-delegate ui            # opens http://127.0.0.1:3090/#token=... in your browser
-```
-
-The local dashboard has four parts:
-
-- a task form with routing analysis (decision, reasons, weights, filtered-out candidates);
-- runs, with live status, verification, warnings, the diff, and accept/reject for `pending-review`;
-- history and per-agent stats;
-- detected agents and the model registry.
-
-It starts in French and switches to English with one button.
-
-It only listens on `127.0.0.1` and needs the random token in the printed link, so other websites
-can't drive it. It also checks the Host and Origin headers and sends no CORS headers. Runs go
-through the same CLI pipeline, so every safeguard applies.
-
-`run` exits after the worker finishes and verification completes. Its `status` is one of:
+Its `status` is one of:
 
 | Status | Meaning |
 | --- | --- |

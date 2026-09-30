@@ -9,7 +9,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { getAdapter } from "../adapters/index.mjs";
-import { buildBrief, buildReviewBrief, parseVerdict, parseWorkerReport } from "../brief/brief.mjs";
+import { buildBrief, buildCorrectionBrief, buildReviewBrief, parseVerdict, parseWorkerReport } from "../brief/brief.mjs";
 import { loadConfig, stateHome, statePaths } from "../config/config.mjs";
 import { SCHEMAS } from "../config/schema.mjs";
 import { discoverAgents } from "../discovery/discovery.mjs";
@@ -118,12 +118,13 @@ async function runPipeline({ task, cwd, request = {}, home = stateHome(), signal
     runId,
     runDir,
     task: { taskType: profile.taskType, categories: profile.categories, riskLevel: profile.riskLevel },
-    route: { decision: decision.decision, primary: decision.primary, fallbacks: decision.fallbacks, review: decision.review, confidence: decision.confidence, mode: decision.mode },
+    route: { decision: decision.decision, primary: decision.primary, fallbacks: decision.fallbacks, review: decision.review, confidence: decision.confidence, mode: decision.mode, lane: decision.lane ?? null },
     status: null,
     attempts: [],
     changes: null,
     verification: null,
     review: null,
+    corrections: [],
     warnings: [...decision.warnings],
     nextSteps: [],
   };
@@ -177,7 +178,7 @@ async function runPipeline({ task, cwd, request = {}, home = stateHome(), signal
     return finish("dry-run");
   }
 
-  const timeoutMs = parseDuration(request.timeout ?? config.execution.timeout);
+  const timeoutMs = parseDuration(request.timeout ?? (config.delegation?.lanes?.length ? `${config.delegation.attemptLimitMinutes ?? 120}m` : config.execution.timeout));
   const killGraceMs = config.execution.killGraceMs;
 
   let baselineGates = null;
@@ -239,7 +240,7 @@ async function runPipeline({ task, cwd, request = {}, home = stateHome(), signal
     finalCandidate = candidate;
     if (result.status === "completed") break;
 
-    const clean = comparison.workerChanges.length === 0 && comparison.userWorkSafe && result.policyViolation !== true;
+    const clean = comparison.workerChanges.length === 0 && comparison.userWorkSafe && !comparison.branchChanged && result.policyViolation !== true;
     const canFallback = fallbackCanHelp(result.failure) && clean && attempt < candidates.length && !signal.aborted;
     appendOutcome(attemptOutcome({
       runId, root, prep, candidate, attempt, result, fallbackUsed: attempt > 1,
@@ -254,11 +255,110 @@ async function runPipeline({ task, cwd, request = {}, home = stateHome(), signal
     log.warn(`attempt ${attempt} failed (${result.failure.class}: ${result.failure.reason}); falling back`);
   }
 
-  // 4. Attribute changes.
+  // Inspect against the original baseline after each worker and each review.
+  // In particular, a correction is NOT a fallback: it keeps the implementer
+  // and its existing edits, and cannot bypass a safety finding.
+  const reviewBy = request.review ?? decision.review.by;
+  const correctionLimit = config.delegation?.correctionLimit ?? 1;
+  let reviewerWrote = false;
+  let reviewPassed = null;
+  let verification = { ran: false, passed: null, results: [] };
+  let outside = [];
+  let diff;
+  const inspect = (artifactDir, phase) => {
+    comparison = compareToBaseline(baseline);
+    outside = outOfScope([...comparison.workerChanges.map((c) => c.path), ...comparison.userFilesTouched.map((t) => t.path)], profile.scopeFiles);
+    const inspectionPath = join(artifactDir, `inspection-${phase}.json`);
+    writeJsonAtomic(inspectionPath, { ...comparison, outOfScope: outside });
+    const correction = summary.corrections.at(-1);
+    if (correction && artifactDir === join(runDir, `correction-${correction.round}`)) correction.inspections[phase] = inspectionPath;
+    return !comparison.headChanged && !comparison.branchChanged && comparison.userWorkSafe &&
+      outside.length === 0 && !reviewerWrote && final.policyViolation !== true &&
+      !summary.attempts.some((a) => a.policyViolation === true);
+  };
+  let safe = inspect(join(runDir, `attempt-${summary.attempts.length}`), "worker");
+  if (request.skipVerification) summary.warnings.push(L("run.verificationSkipped"));
+  else if (!gates.length) summary.warnings.push(L("run.noGates"));
+
+  for (let round = 0; ; round += 1) {
+    const artifactDir = round ? join(runDir, `correction-${round}`) : runDir;
+    if (signal.aborted || final.status !== "completed" || !safe) break;
+    if (!request.skipVerification && gates.length) {
+      verification = await runGates(root, gates, { timeoutMs: parseDuration(config.execution.gateTimeout), outDir: artifactDir });
+    }
+    summary.verification = { ...verification, suggestions, workerClaimedPass: parseWorkerReport(final.finalMessage).claimsTestsPass };
+    if (round) summary.corrections.at(-1).verification = summary.verification;
+    if (signal.aborted) break;
+    safe = inspect(artifactDir, "gates");
+    if (!safe) break;
+    if (baselineGates?.passed === false && verification.passed === false && round === 0) summary.warnings.push(L("run.gatesAlreadyFailing"));
+
+    if (comparison.workerChanges.length === 0 && profile.writeRequired) {
+      summary.review = { by: "none", verdict: null, note: "worker completed without changing any file" };
+      break;
+    }
+    if (reviewBy === "independent" && verification.passed !== false) {
+      diff = diffForPaths(root, [...comparison.workerChanges, ...comparison.userFilesTouched.map((t) => ({ path: t.path, kind: t.kind }))]);
+      summary.review = await independentReview({ prep, task, runDir: artifactDir, root, diff, verification, workerReport: final.finalMessage, timeoutMs, killGraceMs });
+      reviewerWrote ||= summary.review.readOnlyViolation;
+      if (reviewerWrote) summary.warnings.push(L("run.reviewerWrote"));
+      reviewPassed = summary.review.verdict === "APPROVE" ? true : summary.review.verdict === "REQUEST_CHANGES" ? false : null;
+      safe = inspect(artifactDir, "review");
+      if (signal.aborted) break;
+    } else {
+      summary.review = { by: reviewBy, verdict: null };
+      reviewPassed = null;
+    }
+    if (round) summary.corrections.at(-1).review = summary.review;
+    const actionableGateFailure = verification.passed === false && baselineGates?.passed !== false &&
+      verification.results.some((r) => !r.passed && !r.error);
+    if (!safe || round >= correctionLimit || (!actionableGateFailure && reviewPassed !== false)) break;
+
+    // Only actionable independent evidence triggers a correction. Re-run the
+    // original worker, resuming only when its adapter supports this session.
+    const number = round + 1;
+    const correctionDir = join(runDir, `correction-${number}`);
+    mkdirSync(correctionDir, { recursive: true, mode: 0o700 });
+    const correctionBrief = buildCorrectionBrief({ originalBrief: brief.text, round: number, verification, review: summary.review });
+    const briefPath = join(correctionDir, "brief.md");
+    writeFileSync(briefPath, correctionBrief.text, { mode: 0o600 });
+    const adapter = getAdapter(finalCandidate.agent);
+    const agentInfo = prep.discovery.agents.find((a) => a.id === finalCandidate.agent);
+    const sessionId = adapter.capabilities.supportsResume && final.sessionId ? final.sessionId : null;
+    const correction = { round: number, candidate: finalCandidate, reason: verification.passed === false ? "failed-gates" : "review-requested-changes", resumed: Boolean(sessionId), briefPath, resultPath: join(correctionDir, "result.json"), inspections: {}, verification: null, review: null };
+    summary.corrections.push(correction);
+    summary.initialAssessment ??= { verification: summary.verification, review: summary.review };
+    // These results describe the pre-correction tree, not the tree the worker
+    // is about to leave behind (even when it fails after a partial edit).
+    summary.verification = null;
+    summary.review = null;
+    verification = { ran: false, passed: null, results: [] };
+    reviewPassed = null;
+    log.info(`correction ${number}: ${finalCandidate.agent} (${correction.reason})`);
+    final = await (sessionId ? adapter.resume : adapter.run)({
+      binaryPath: agentInfo.binaryPath, cwd: root, brief: correctionBrief.text,
+      model: finalCandidate.model, provider: finalCandidate.provider ?? null,
+      agentConfig: config.agents?.[finalCandidate.agent] ?? {}, agentInfo,
+      effort: finalCandidate.effort ?? null, readOnly: false, sessionId,
+      outDir: correctionDir, timeoutMs, killGraceMs, images: request.images ?? [],
+    });
+    if (signal.aborted && final.status !== "completed") {
+      final.status = "aborted";
+      final.failure = { class: FAILURE.UNKNOWN, scope: "agent", reason: "aborted by user signal" };
+    }
+    writeJsonAtomic(correction.resultPath, final);
+    correction.status = final.status;
+    correction.failure = final.failure;
+    correction.sessionId = final.sessionId;
+    safe = inspect(correctionDir, "worker");
+  }
+
+  // Final diff and attribution include any edits from a correction or reviewer.
+  comparison = compareToBaseline(baseline);
+  outside = outOfScope([...comparison.workerChanges.map((c) => c.path), ...comparison.userFilesTouched.map((t) => t.path)], profile.scopeFiles);
   const workerPaths = comparison.workerChanges;
-  const diff = diffForPaths(root, [...workerPaths, ...comparison.userFilesTouched.map((t) => ({ path: t.path, kind: t.kind }))]);
+  diff = diffForPaths(root, [...workerPaths, ...comparison.userFilesTouched.map((t) => ({ path: t.path, kind: t.kind }))]);
   writeFileSync(join(runDir, "diff.patch"), diff.patch, { mode: 0o600 });
-  const outside = outOfScope([...workerPaths.map((c) => c.path), ...comparison.userFilesTouched.map((t) => t.path)], profile.scopeFiles);
   summary.changes = {
     workerChanges: workerPaths,
     userFilesTouched: comparison.userFilesTouched,
@@ -277,85 +377,42 @@ async function runPipeline({ task, cwd, request = {}, home = stateHome(), signal
   if (comparison.userChangesReverted.length) summary.warnings.push(L("run.userChangesGone", { files: comparison.userChangesReverted.join(", ") }));
   if (outside.length) summary.warnings.push(L("run.outOfScope", { files: outside.join(", ") }));
 
-  const fallbackUsed = summary.attempts.length > 1;
   const recordFinal = (fields) => appendOutcome(attemptOutcome({
-    runId, root, prep, candidate: finalCandidate, attempt: summary.attempts.length, result: final, fallbackUsed,
+    runId, root, prep, candidate: finalCandidate, attempt: summary.attempts.length, result: final, fallbackUsed: summary.attempts.length > 1,
     fields: { filesChanged: workerPaths.length, ...fields },
   }), home);
-
   if (signal.aborted) {
     summary.nextSteps.push(L("run.aborted"));
     return finish("aborted");
   }
+  const integrityProblem = !safe || comparison.headChanged || comparison.branchChanged || !comparison.userWorkSafe || outside.length > 0 || reviewerWrote || final.policyViolation === true;
+  if (integrityProblem) {
+    recordFinal({ status: "needs-attention", success: false, failureClass: FAILURE.POLICY, testsPassed: verification.passed, reviewPassed });
+    summary.nextSteps.push(L("run.nextIntegrity"));
+    return finish("needs-attention");
+  }
   if (final.status !== "completed") {
-    summary.nextSteps.push(L("run.inspectAttempt", { dir: join(runDir, `attempt-${summary.attempts.length}`) }));
+    if (summary.corrections.length) {
+      recordFinal({ status: "failed", success: false, failureClass: final.failure?.class ?? FAILURE.UNKNOWN, testsPassed: null, reviewPassed: null });
+    }
+    summary.nextSteps.push(L("run.inspectAttempt", { dir: summary.corrections.at(-1)?.resultPath ?? join(runDir, `attempt-${summary.attempts.length}`) }));
     return finish("failed");
   }
-
-  const writeExpected = profile.writeRequired;
-  const integrityProblem = comparison.headChanged || comparison.userChangesReverted.length > 0 || summary.attempts.some((a) => a.policyViolation === true);
-
-  // 5. Independent verification.
-  let verification = { ran: false, passed: null, results: [] };
-  if (request.skipVerification) {
-    summary.warnings.push(L("run.verificationSkipped"));
-  } else if (gates.length) {
-    verification = await runGates(root, gates, { timeoutMs: parseDuration(config.execution.gateTimeout), outDir: runDir });
-  } else {
-    summary.warnings.push(L("run.noGates"));
-  }
-  summary.verification = { ...verification, suggestions, workerClaimedPass: summary.attempts.at(-1).workerReport.claimsTestsPass };
-  if (signal.aborted) {
-    // An interrupted gate is not the model's fault: record nothing against it.
-    summary.nextSteps.push(L("run.abortedGates"));
-    return finish("aborted");
-  }
-  if (baselineGates?.passed === false && verification.passed === false) {
-    summary.warnings.push(L("run.gatesAlreadyFailing"));
-  }
-
-  // 6. Review.
-  const reviewBy = request.review ?? decision.review.by;
-  let reviewPassed = null;
-  if (workerPaths.length === 0 && writeExpected) {
-    summary.review = { by: "none", verdict: null, note: "worker completed without changing any file" };
+  if (workerPaths.length === 0 && profile.writeRequired) {
     recordFinal({ status: "no-changes", success: false, failureClass: FAILURE.QUALITY, testsPassed: verification.passed, reviewPassed: null });
     summary.nextSteps.push(L("run.noChanges"));
     return finish("no-changes");
   }
-  if (reviewBy === "independent" && verification.passed !== false && !integrityProblem) {
-    summary.review = await independentReview({ prep, task, runDir, root, diff, verification, workerReport: final.finalMessage, timeoutMs, killGraceMs, request });
-    reviewPassed = summary.review.verdict === "APPROVE" ? true : summary.review.verdict === "REQUEST_CHANGES" ? false : null;
-    if (summary.review.readOnlyViolation) summary.warnings.push(L("run.reviewerWrote"));
-  } else {
-    summary.review = { by: reviewBy, verdict: null };
-  }
-
-  // 7. Status.
   let status;
-  let failureClass = null;
-  if (integrityProblem) {
-    status = "needs-attention";
-    failureClass = FAILURE.POLICY;
-  } else if (verification.passed === false) {
-    status = "verification-failed";
-    failureClass = FAILURE.QUALITY;
-  } else if (reviewPassed === false) {
-    status = "changes-requested";
-    failureClass = FAILURE.QUALITY;
-  } else if (verification.passed === true && (reviewBy === "none" || reviewPassed === true) && comparison.userFilesTouched.length === 0 && outside.length === 0) {
-    status = "verified";
-  } else {
-    status = "pending-review";
-  }
-  const success = status === "verified" || status === "pending-review";
-  recordFinal({ status, success, failureClass, testsPassed: verification.passed, reviewPassed });
-
+  if (verification.passed === false) status = "verification-failed";
+  else if (reviewPassed === false) status = "changes-requested";
+  else if (verification.passed === true && (reviewBy === "none" || reviewPassed === true)) status = "verified";
+  else status = "pending-review";
+  recordFinal({ status, success: status === "verified" || status === "pending-review", failureClass: ["verification-failed", "changes-requested"].includes(status) ? FAILURE.QUALITY : null, testsPassed: verification.passed, reviewPassed });
   if (status === "verified") summary.nextSteps.push(L("run.nextVerified"));
   if (status === "pending-review") summary.nextSteps.push(L("run.nextPending", { diff: summary.changes.diffPath, runId }));
   if (status === "verification-failed") summary.nextSteps.push(L("run.nextGatesFailed", { session: final.sessionId ?? "n/a" }));
   if (status === "changes-requested") summary.nextSteps.push(L("run.nextChangesRequested"));
-  if (status === "needs-attention") summary.nextSteps.push(L("run.nextIntegrity"));
   return finish(status);
 }
 
@@ -391,7 +448,7 @@ async function independentReview({ prep, task, runDir, root, diff, verification,
     status: result.status,
     verdict,
     findings: result.finalMessage.slice(0, 4000),
-    readOnlyViolation: after.workerChanges.length > 0 || after.userFilesTouched.length > 0 || result.policyViolation === true,
+    readOnlyViolation: after.workerChanges.length > 0 || after.userFilesTouched.length > 0 || after.userChangesReverted.length > 0 || after.headChanged || after.branchChanged || result.policyViolation === true,
     error: result.error,
   };
 }

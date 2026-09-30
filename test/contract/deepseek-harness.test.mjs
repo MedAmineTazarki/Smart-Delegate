@@ -59,6 +59,15 @@ describe("deepseek-harness adapter", () => {
     assert.ok(!off.notes.some((n) => /declared/.test(n)));
   });
 
+  it("gives a keyless custom endpoint a local placeholder credential", async () => {
+    const profile = { api: "openai-completions", baseURL: "http://127.0.0.1:9999/v1", models: [{ id: "mock-model" }] };
+    const r = await run({ provider: "local-test", model: "mock-model" }, {
+      SMART_DELEGATE_DSH_PROVIDER_PROFILES: JSON.stringify({ "local-test": profile }),
+    });
+    const patch = JSON.parse(readFileSync(join(r.artifacts.events, "..", "dsh-patch.json"), "utf8"));
+    assert.equal(patch.find((p) => p.id === "llm-pi-ai").config.providers["local-test"].apiKeyEnv, "SMART_DELEGATE_KEYLESS_PROVIDER");
+  });
+
   it("web tools are disabled and verified (a renamed web row refuses the run)", async () => {
     const r = await run({});
     const patch = JSON.parse(readFileSync(join(r.artifacts.events, "..", "dsh-patch.json"), "utf8"));

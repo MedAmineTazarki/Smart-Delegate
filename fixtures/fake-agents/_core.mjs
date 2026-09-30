@@ -17,6 +17,7 @@
 //   FAKE_PID_FILE         timeout mode: write "<pid> <grandchild pid>" here
 //   FAKE_IGNORE_SIGTERM   timeout mode: ignore SIGTERM (forces SIGKILL path)
 //   FAKE_EDIT_ON_FAILURE  failure mode: apply FAKE_EDITS before failing
+//   FAKE_SEQUENCE         JSON {workers:[{edits}],reviews:[{verdict,write}]} by invocation order (requires FAKE_AGENT_LOG)
 import { spawn } from "node:child_process";
 import { appendFileSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -193,15 +194,32 @@ export function runFake(behavior) {
 
   const format = detectFormat(argv);
   const brief = readStdin();
-  if (process.env.FAKE_AGENT_LOG) {
-    appendFileSync(process.env.FAKE_AGENT_LOG, `${JSON.stringify({ behavior, format, argv, cwd: process.cwd(), briefLength: brief.length, brief })}\n`);
-  }
   const readOnly = isReadOnly(argv, format);
+  let step = null;
+  if (process.env.FAKE_SEQUENCE && process.env.FAKE_AGENT_LOG) {
+    const previous = (() => {
+      try { return readFileSync(process.env.FAKE_AGENT_LOG, "utf8").trim().split("\n").map((line) => JSON.parse(line)); }
+      catch { return []; }
+    })();
+    const sequence = JSON.parse(process.env.FAKE_SEQUENCE);
+    step = (readOnly ? sequence.reviews : sequence.workers)?.[previous.filter((p) => p.readOnly === readOnly).length] ?? null;
+  }
+  if (process.env.FAKE_AGENT_LOG) {
+    appendFileSync(process.env.FAKE_AGENT_LOG, `${JSON.stringify({ behavior, format, argv, cwd: process.cwd(), readOnly, briefLength: brief.length, brief })}\n`);
+  }
+  if (step?.edits) process.env.FAKE_EDITS = JSON.stringify(step.edits);
   const report = process.env.FAKE_MESSAGE ?? "STATUS: DONE\nSUMMARY: fake work done\nFILES_CHANGED:\n- see diff\nCOMMANDS_RUN:\n- npm test: pass\nRISKS:\n- none";
 
   if (readOnly && behavior !== "failure") {
-    if (process.env.FAKE_REVIEW_WRITES) writeFileSync(join(process.cwd(), process.env.FAKE_REVIEW_WRITES), "reviewer wrote this\n");
-    emitSuccess(format, argv, `Reviewed.\nVERDICT: ${process.env.FAKE_VERDICT ?? "APPROVE"}\nFINDINGS:\n- low none`);
+    if (step?.write || process.env.FAKE_REVIEW_WRITES) writeFileSync(join(process.cwd(), step?.write ?? process.env.FAKE_REVIEW_WRITES), "reviewer wrote this\n");
+    emitSuccess(format, argv, `Reviewed.\nVERDICT: ${step?.verdict ?? process.env.FAKE_VERDICT ?? "APPROVE"}\nFINDINGS:\n- medium src/feature.txt:1 fix the observed issue`);
+    return;
+  }
+
+  if (step?.fail) {
+    applyEdits(process.cwd());
+    emitFailure(format, step.fail);
+    process.exitCode = 1;
     return;
   }
 

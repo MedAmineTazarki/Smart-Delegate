@@ -9,6 +9,7 @@
 // Nothing in this file names an agent or a model. Changing the registry or
 // the config is enough to change the outcome.
 import { ADAPTERS } from "../adapters/index.mjs";
+import { chooseLane } from "../config/delegation.mjs";
 import { SCHEMAS } from "../config/schema.mjs";
 import { healthFactor, localReliability } from "../history/ledger.mjs";
 import { UNKNOWN_CAPABILITY } from "../registry/registry.mjs";
@@ -94,13 +95,21 @@ export function route({ profile, config, entries, discovery, history = [], reque
   const routing = config.routing;
   const mode = request.mode ?? routing.defaultMode;
   if (!MODES.includes(mode)) throw Object.assign(new Error(`unknown mode "${mode}" (use ${MODES.join(", ")})`), { code: "SD_USAGE" });
-  const override = request.agent || request.model ? { agent: request.agent ?? null, model: request.model ?? null } : null;
+  if (request.lane && (request.agent || request.model)) {
+    throw Object.assign(new Error("choose either a lane or an explicit agent/model"), { code: "SD_USAGE" });
+  }
+  const laneChoice = request.agent || request.model ? { lane: null } : chooseLane(config.delegation, profile, request.lane);
+  const lane = laneChoice.lane ?? null;
+  const override = request.agent || request.model
+    ? { agent: request.agent ?? null, model: request.model ?? null }
+    : lane ? { agent: lane.agent, model: (lane.agent === "deepseek-harness" || lane.agent === "pi-agent") && lane.provider ? `${lane.provider}/${lane.model}` : lane.model } : null;
   const warnings = [];
 
   const base = {
     schema: SCHEMAS.route,
     mode,
     override,
+    lane: lane?.id ?? null,
     profile,
     primary: null,
     fallbacks: [],
@@ -115,6 +124,7 @@ export function route({ profile, config, entries, discovery, history = [], reque
   if (request.noDelegate) {
     return { ...base, decision: "stay", reasons: [L("why.userNoDelegate")] };
   }
+  if (laneChoice.error) return { ...base, decision: "no-candidate", reasons: [laneChoice.error] };
 
   // Candidate pool (manual override narrows it; unknown pairs become ad-hoc entries).
   let pool = entries;
@@ -229,7 +239,7 @@ export function route({ profile, config, entries, discovery, history = [], reque
       agent: entry.agent,
       model: entry.model,
       provider: entry.provider,
-      effort: entry.effort ?? config.agents?.[entry.agent]?.effort ?? null,
+      effort: lane?.reasoningEffort ?? entry.effort ?? config.agents?.[entry.agent]?.effort ?? null,
       score,
       costTier: entry.costTier,
       status: entry.status,

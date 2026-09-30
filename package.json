@@ -29,10 +29,20 @@
   "icon": "./harness/icon.svg",
   "exports": {
     ".": "./harness/index.js",
+    "./client": "./harness/client.js",
     "./package.json": "./package.json",
     "./locale/*.json": "./harness/locale/*.json"
   },
   "dsh": {
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-settings-models"
+      ]
+    },
     "bundle": {
       "patch": "./harness/cordis.patch.yml"
     }

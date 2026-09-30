@@ -73,6 +73,16 @@
           }
         }
       }
+    },
+    "delegation": {
+      "type": "object",
+      "properties": {
+        "lanes": { "type": "array" },
+        "defaultLane": { "type": ["string", "null"] },
+        "concurrentAttempts": { "type": "integer", "minimum": 1, "maximum": 10 },
+        "attemptLimitMinutes": { "type": "number", "minimum": 1, "maximum": 480 },
+        "correctionLimit": { "type": "integer", "minimum": 0, "maximum": 4 }
+      }
     }
   }
 }

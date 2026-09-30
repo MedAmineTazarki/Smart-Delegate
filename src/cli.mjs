@@ -1,6 +1,5 @@
 // Command-line interface. With --json, stdout carries exactly one JSON
 // document (the contract) and every diagnostic goes to stderr.
-import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
@@ -36,7 +35,6 @@ Commands:
   run <task>            route, delegate, verify, review, record
   history               recent outcomes  (--stats: per agent/model aggregates, --limit N)
   outcome <runId>       record your final decision: --accept | --reject [--reason text]
-  ui                    local web UI (French/English) on 127.0.0.1  (--port N, --no-open)
 
 Task input: positional text, or --task-file <path>.
 
@@ -44,6 +42,7 @@ Routing options (route/explain/run):
   --mode <m>            auto | quality | balanced | economy | fast | local-only
   --agent <id>          use this agent (manual override)
   --model <id>          use this model (manual override)
+  --lane <id>           use a configured delegation lane
   --exclude-agent <id>  repeatable      --exclude-provider <id>  repeatable
   --no-delegate         do not delegate (decision "stay")
   --force-delegate      delegate even if the task looks trivial
@@ -83,7 +82,6 @@ Commandes :
   run <tâche>           route, délègue, vérifie, relit, enregistre
   history               derniers résultats  (--stats : agrégats par agent/modèle, --limit N)
   outcome <runId>       enregistre ta décision finale : --accept | --reject [--reason texte]
-  ui                    interface web locale (français/anglais) sur 127.0.0.1  (--port N, --no-open)
 
 Tâche : texte en argument, ou --task-file <chemin>.
 
@@ -91,6 +89,7 @@ Options de routage (route/explain/run) :
   --mode <m>            auto | quality | balanced | economy | fast | local-only
   --agent <id>          impose cet agent
   --model <id>          impose ce modèle (fournisseur/modèle pour deepseek-harness et pi-agent)
+  --lane <id>           utilise une voie de délégation configurée
   --exclude-agent <id>  répétable       --exclude-provider <id>  répétable
   --no-delegate         ne pas déléguer (décision « faire directement »)
   --force-delegate      déléguer même si la tâche semble triviale
@@ -126,6 +125,7 @@ const OPTIONS = {
   mode: { type: "string" },
   agent: { type: "string" },
   model: { type: "string" },
+  lane: { type: "string" },
   "exclude-agent": { type: "string", multiple: true },
   "exclude-provider": { type: "string", multiple: true },
   "no-delegate": { type: "boolean" },
@@ -158,8 +158,6 @@ const OPTIONS = {
   accept: { type: "boolean" },
   reject: { type: "boolean" },
   reason: { type: "string" },
-  port: { type: "string" },
-  "no-open": { type: "boolean" },
 };
 
 export const EXIT = { ok: 0, failure: 1, usage: 2, noCandidate: 3 };
@@ -194,6 +192,7 @@ function routingRequest(values) {
     mode: values.mode,
     agent: values.agent,
     model: values.model,
+    lane: values.lane,
     excludeAgents: splitList(values["exclude-agent"]),
     excludeProviders: splitList(values["exclude-provider"]),
     noDelegate: values["no-delegate"] ?? false,
@@ -359,6 +358,11 @@ async function cmdRun(ctx) {
   for (const a of summary.attempts) {
     lines.push(t("cli.attempt", { n: a.attempt, candidate: candidateLabel(a.candidate), status: label("status", a.status), failure: a.failure ? ` [${a.failure.class}: ${a.failure.reason}]` : "", duration: a.durationMs ? ` (${Math.round(a.durationMs / 1000)} s)` : "" }));
   }
+  for (const c of summary.corrections ?? []) {
+    lines.push(`Correction ${c.round}: ${candidateLabel(c.candidate)} (${c.reason}, ${c.resumed ? "resume" : "rerun"}) -> ${c.status}; ${c.briefPath}`);
+    for (const g of c.verification?.results ?? []) lines.push(t("cli.gate", { result: g.passed ? "OK" : "KO", command: g.argv.join(" ") }));
+    if (c.review?.verdict) lines.push(t("cli.reviewVerdict", { agent: c.review.agent, verdict: c.review.verdict }));
+  }
   if (summary.changes) {
     lines.push(t("cli.changed", { n: summary.changes.workerChanges.length, preserved: summary.changes.userChangesPreserved }));
     for (const c of summary.changes.workerChanges.slice(0, 30)) lines.push(`  ${c.kind.padEnd(9)} ${c.path}`);
@@ -474,27 +478,6 @@ function cmdDoctor(ctx) {
   return failed.length ? EXIT.failure : EXIT.ok;
 }
 
-async function cmdUi(ctx) {
-  const { startUiServer } = await import("./ui/server.mjs");
-  const port = ctx.values.port === undefined ? 3090 : num(ctx.values.port, "port", 0, 65535);
-  const info = await startUiServer({ port, cwd: ctx.cwd });
-  process.stdout.write(`${t("ui.started", { url: info.url })}\n${t("ui.keep")}\n`);
-  if (!ctx.values["no-open"] && process.stdout.isTTY) {
-    const opener = process.platform === "darwin" ? "open" : process.platform === "win32" ? null : "xdg-open";
-    if (opener) spawn(opener, [info.url], { stdio: "ignore", detached: true }).on("error", () => {}).unref();
-  }
-  await new Promise((resolveStop) => {
-    const stop = () => {
-      for (const job of info.jobs.values()) job.child?.kill("SIGINT");
-      info.server.close(() => resolveStop());
-      setTimeout(resolveStop, 3000).unref();
-    };
-    process.once("SIGINT", stop);
-    process.once("SIGTERM", stop);
-  });
-  return EXIT.ok;
-}
-
 const COMMANDS = {
   setup: cmdSetup,
   doctor: cmdDoctor,
@@ -505,7 +488,6 @@ const COMMANDS = {
   run: cmdRun,
   history: cmdHistory,
   outcome: cmdOutcome,
-  ui: cmdUi,
 };
 
 export async function main(argv) {

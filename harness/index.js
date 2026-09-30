@@ -20,6 +20,10 @@
 //   - accepting or rejecting a result stays with the user (/delegate accept).
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { loadConfig } from "../src/config/config.mjs";
+import { providerProfilesFromSettings, registerSettingsApi } from "./settings.js";
+import { registerProvidersApi } from "./providers.js";
+import { registerAuthorizationApi } from "./authorization.js";
 
 export const name = "smart-delegate";
 export const inject = ["tools"];
@@ -29,13 +33,31 @@ const BIN = fileURLToPath(new URL("../bin/smart-delegate.mjs", import.meta.url))
 const MAX_TASK = 20_000;
 const RUN_ID = /^[0-9TZ-]+-[a-z0-9]{6}$/i;
 const TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,127}$/;
+const activeRuns = new WeakMap();
+
+async function withSessionCapacity(session, work) {
+  if (!session || typeof session !== "object") return work();
+  const limit = loadConfig().config.delegation?.concurrentAttempts ?? 3;
+  const current = activeRuns.get(session) ?? 0;
+  if (current >= limit) throw new Error(`This session already has ${limit} Smart Delegate runs in progress.`);
+  activeRuns.set(session, current + 1);
+  try { return await work(); }
+  finally {
+    const remaining = (activeRuns.get(session) ?? 1) - 1;
+    if (remaining) activeRuns.set(session, remaining); else activeRuns.delete(session);
+  }
+}
 
 /** Run the Smart Delegate CLI for one call; resolves with its JSON output. */
 export function runCli(args, { cwd, signal, env = process.env } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(process.execPath, [BIN, ...args, "--json"], {
       cwd,
-      env: { ...env, SMART_DELEGATE_LANG: "en" },
+      env: {
+        ...env,
+        SMART_DELEGATE_LANG: "en",
+        ...(env.SMART_DELEGATE_DSH_BIN ? {} : process.argv[1]?.includes("@deepseek-ai/dsh/") ? { SMART_DELEGATE_DSH_BIN: process.argv[1] } : {}),
+      },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let out = "";
@@ -57,6 +79,13 @@ export function runCli(args, { cwd, signal, env = process.env } = {}) {
   });
 }
 
+function runEnvironment(ctx) {
+  const profiles = providerProfilesFromSettings(ctx);
+  return Object.keys(profiles).length
+    ? { ...process.env, SMART_DELEGATE_DSH_PROVIDER_PROFILES: JSON.stringify(profiles) }
+    : process.env;
+}
+
 /** Validate model arguments (raw tools own their validation) and build argv. */
 export function argvFor(args) {
   const a = args ?? {};
@@ -66,7 +95,7 @@ export function argvFor(args) {
   if (typeof a.task !== "string" || !a.task.trim()) throw new Error("task is required");
   if (a.task.length > MAX_TASK) throw new Error(`task is longer than ${MAX_TASK} characters`);
   const argv = [action, a.task];
-  for (const [flag, value] of [["--mode", a.mode], ["--agent", a.agent], ["--model", a.model], ["--risk", a.risk]]) {
+  for (const [flag, value] of [["--mode", a.mode], ["--agent", a.agent], ["--model", a.model], ["--lane", a.lane], ["--risk", a.risk]]) {
     if (value === undefined || value === null || value === "") continue;
     if (typeof value !== "string" || !TOKEN.test(value)) throw new Error(`${flag.slice(2)} must be a plain token`);
     argv.push(flag, value);
@@ -92,6 +121,7 @@ export function compact(action, json) {
       status: json.status,
       route: json.route?.primary ?? null,
       attempts: (json.attempts ?? []).map((t) => ({ agent: t.candidate?.agent, model: t.candidate?.model ?? null, status: t.status, failure: t.failure?.class ?? null })),
+      corrections: (json.corrections ?? []).map((c) => ({ round: c.round, agent: c.candidate?.agent, reason: c.reason, resumed: c.resumed, status: c.status, briefPath: c.briefPath, gatesPassed: c.verification?.passed ?? null, review: c.review?.verdict ?? null })),
       changedFiles: (json.changes?.workerChanges ?? []).map((c) => `${c.kind} ${c.path}`).slice(0, 100),
       verification: json.verification?.ran ? json.verification.results.map((g) => `${g.passed ? "PASS" : "FAIL"} ${g.argv.join(" ")}`) : [],
       review: json.review?.verdict ?? null,
@@ -103,6 +133,7 @@ export function compact(action, json) {
   return {
     ok: json.decision !== "no-candidate",
     decision: json.decision,
+    lane: json.lane ?? null,
     primary: json.primary,
     fallbacks: json.fallbacks,
     review: json.review,
@@ -121,6 +152,7 @@ function renderText(action, v) {
       `Run ${v.runId}: ${v.status}`,
       v.route ? `Routed to ${v.route.agent} / ${v.route.model ?? "default model"}` : null,
       ...v.attempts.map((t, i) => `Attempt ${i + 1}: ${t.agent}/${t.model ?? "default"} -> ${t.status}${t.failure ? ` [${t.failure}]` : ""}`),
+      ...(v.corrections ?? []).map((c) => `Correction ${c.round}: ${c.agent} (${c.reason}, ${c.resumed ? "resume" : "rerun"}) -> ${c.status}; gates ${c.gatesPassed ?? "not run"}; review ${c.review ?? "not run"}; ${c.briefPath}`),
       v.changedFiles.length ? `Changed files:\n${v.changedFiles.join("\n")}` : "No files changed.",
       ...v.verification,
       v.review ? `Independent review: ${v.review}` : null,
@@ -133,6 +165,7 @@ function renderText(action, v) {
     `Decision: ${v.decision}`,
     v.primary ? `Primary: ${v.primary.agent} / ${v.primary.model ?? "default model"} (score ${v.primary.score}, confidence ${v.confidence})` : null,
     v.fallbacks?.length ? `Fallbacks: ${v.fallbacks.map((f) => `${f.agent}/${f.model ?? "default"}`).join(", ")}` : null,
+    v.lane ? `Lane: ${v.lane}` : null,
     `Review: ${v.review?.by ?? "none"}`,
     `Why: ${(v.reasons ?? []).join("; ")}`,
     v.excluded.length ? `Filtered out: ${v.excluded.slice(0, 10).join("; ")}` : null,
@@ -150,6 +183,7 @@ const PARAMETERS = {
     mode: { type: "string", enum: ["auto", "quality", "balanced", "economy", "fast", "local-only"], description: "Routing mode (default auto)." },
     agent: { type: "string", description: "Force an agent: claude, codex, command-code, deepseek-harness, pi-agent." },
     model: { type: "string", description: "Force a model (provider/model for deepseek-harness and pi-agent)." },
+    lane: { type: "string", description: "Use a configured Smart Delegate lane." },
     risk: { type: "string", enum: ["low", "medium", "high"], description: "Override the detected risk." },
     files: { type: "array", items: { type: "string" }, description: "Repository paths in scope." },
     gates: { type: "array", items: { type: "string" }, description: "Verification commands to run after the worker (e.g. \"npm test\")." },
@@ -163,6 +197,9 @@ export function apply(ctx, config) {
     return;
   }
   const options = config && typeof config === "object" ? config : {};
+  registerSettingsApi(ctx);
+  registerProvidersApi(ctx);
+  registerAuthorizationApi(ctx);
 
   ctx.tools.register({
     name: TOOL_NAME,
@@ -177,7 +214,8 @@ export function apply(ctx, config) {
       if (!cwd) throw new Error("this session has no working directory");
       const argv = argvFor(args);
       if (argv[0] === "run" && options.timeout) argv.push("--timeout", String(options.timeout));
-      const { json } = await runCli([...argv, "--cwd", cwd], { cwd, signal: exec.signal });
+      const { json } = await withSessionCapacity(args.action === "run" ? exec.agent?.session : null,
+        () => runCli([...argv, "--cwd", cwd], { cwd, signal: exec.signal, env: runEnvironment(ctx) }));
       return compact(args.action, json);
     },
   });
@@ -225,7 +263,7 @@ export function apply(ctx, config) {
           if (first === "accept" || first === "reject") {
             const runId = rest[0];
             if (!RUN_ID.test(runId ?? "")) return { kind: "error", text: "Give a run id, e.g. /delegate accept 20260929T120000-abc123" };
-            const { json } = await runCli(["outcome", runId, `--${first}`], { cwd, signal });
+            const { json } = await runCli(["outcome", runId, `--${first}`], { cwd, signal, env: runEnvironment(ctx) });
             return json.schema === "smart-delegate.error.v1" ? { kind: "error", text: json.error } : { kind: "success", text: `Recorded ${first} for ${runId}.` };
           }
           if (!cwd) return { kind: "error", text: "This session has no working directory." };
@@ -236,7 +274,8 @@ export function apply(ctx, config) {
             if (mode === undefined || mode === "read-only") return { kind: "error", text: `Delegation is not allowed in a ${mode ?? "unknown"} permission mode.` };
           }
           const argv = argvFor({ action, task });
-          const { json } = await runCli([...argv, "--cwd", cwd], { cwd, signal });
+          const { json } = await withSessionCapacity(action === "run" ? agent?.session : null,
+            () => runCli([...argv, "--cwd", cwd], { cwd, signal, env: runEnvironment(ctx) }));
           const value = compact(action, json);
           return { kind: value.ok === false && value.error ? "error" : "success", text: renderText(action, value) };
         } catch (error) {

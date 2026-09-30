@@ -151,6 +151,142 @@ describe("e2e: smart-delegate CLI", () => {
     assert.equal(stats.json.stats[0].accepted, 1);
   });
 
+  it("failed independent gate requests one correction from the original worker and reruns checks", async () => {
+    const home = homeWithAgents({ claude: "edit" });
+    const repo = makeRepo();
+    const agentLog = join(tempDir(), "agents.jsonl");
+    const gate = "node -e process.exit(require('fs').readFileSync('src/feature.txt','utf8').includes('fixed')?0:1)";
+    const env = { FAKE_AGENT_LOG: agentLog, FAKE_SEQUENCE: JSON.stringify({ workers: [
+      { edits: [{ op: "write", path: "src/feature.txt", content: "broken\n" }] },
+      { edits: [{ op: "write", path: "src/feature.txt", content: "fixed\n" }] },
+    ] }) };
+    const r = await runCli(["run", TASK, "--json", "--gate", gate], { cwd: repo, home, env });
+    assert.equal(r.code, 0, JSON.stringify(r.json, null, 2));
+    assert.equal(r.json.status, "verified");
+    assert.equal(r.json.attempts.length, 1, "correction is not a fallback");
+    assert.equal(r.json.initialAssessment.verification.passed, false);
+    assert.equal(r.json.corrections.length, 1);
+    assert.equal(r.json.corrections[0].candidate.agent, r.json.attempts[0].candidate.agent);
+    assert.equal(r.json.corrections[0].resumed, true);
+    assert.equal(r.json.corrections[0].verification.passed, true);
+    assert.equal(r.json.verification.passed, true);
+    assert.match(readFileSync(r.json.corrections[0].briefPath, "utf8"), /FAIL|exit 1/);
+    assert.ok(existsSync(r.json.corrections[0].inspections.worker));
+    assert.ok(existsSync(r.json.corrections[0].inspections.gates));
+    assert.ok(existsSync(join(r.json.runDir, "correction-1", "gate-1.stdout.txt")));
+    assert.equal(readFileSync(join(repo, "src/feature.txt"), "utf8"), "fixed\n");
+  });
+
+  it("independent REQUEST_CHANGES triggers correction and a fresh independent approval", async () => {
+    const home = homeWithAgents({ claude: "edit", codex: "edit" });
+    const repo = makeRepo();
+    const agentLog = join(tempDir(), "agents.jsonl");
+    const env = { FAKE_AGENT_LOG: agentLog, FAKE_SEQUENCE: JSON.stringify({ reviews: [
+      { verdict: "REQUEST_CHANGES" }, { verdict: "APPROVE" },
+    ] }) };
+    const r = await runCli(["run", TASK, "--json", "--risk", "high", ...PASSING_GATE], { cwd: repo, home, env });
+    assert.equal(r.json.status, "verified", JSON.stringify(r.json, null, 2));
+    assert.equal(r.json.initialAssessment.review.verdict, "REQUEST_CHANGES");
+    assert.equal(r.json.corrections[0].reason, "review-requested-changes");
+    assert.equal(r.json.corrections[0].review.verdict, "APPROVE");
+    assert.equal(r.json.review.verdict, "APPROVE");
+    assert.match(readFileSync(r.json.corrections[0].briefPath, "utf8"), /fix the observed issue/);
+    assert.ok(existsSync(join(r.json.runDir, "correction-1", "review", "result.json")));
+    assert.equal(readFileSync(agentLog, "utf8").trim().split("\n").length, 4);
+  });
+
+  it("bounded correction exhausts on persistent gate failures without changing candidates", async () => {
+    const home = homeWithAgents({ claude: "edit" });
+    const repo = makeRepo();
+    const r = await runCli(["run", TASK, "--json", "--gate", "node -e process.exit(1)"], { cwd: repo, home });
+    assert.equal(r.code, 1);
+    assert.equal(r.json.status, "verification-failed");
+    assert.equal(r.json.attempts.length, 1);
+    assert.equal(r.json.corrections.length, 1);
+    assert.equal(r.json.corrections[0].verification.passed, false);
+  });
+
+  it("already failing baseline gates are reported without blaming the worker with a correction", async () => {
+    const home = homeWithAgents({ claude: "edit" });
+    const r = await runCli(["run", TASK, "--json", "--baseline-gates", "--gate", "node -e process.exit(1)"], { cwd: makeRepo(), home });
+    assert.equal(r.json.baselineVerification.passed, false);
+    assert.equal(r.json.verification.passed, false);
+    assert.equal(r.json.status, "verification-failed");
+    assert.equal(r.json.corrections.length, 0);
+  });
+
+  it("failed correction preserves partial work and cannot promote a stale gate result", async () => {
+    const home = homeWithAgents({ claude: "edit" });
+    const repo = makeRepo();
+    const agentLog = join(tempDir(), "agents.jsonl");
+    const env = { FAKE_AGENT_LOG: agentLog, FAKE_SEQUENCE: JSON.stringify({ workers: [
+      { edits: [{ op: "write", path: "src/feature.txt", content: "initial\n" }] },
+      { edits: [{ op: "write", path: "src/feature.txt", content: "partial\n" }], fail: "unrepairable" },
+    ] }) };
+    const r = await runCli(["run", TASK, "--json", "--gate", "node -e process.exit(1)"], { cwd: repo, home, env });
+    assert.equal(r.json.status, "failed");
+    assert.equal(r.json.corrections.length, 1);
+    assert.equal(r.json.corrections[0].status, "failed");
+    assert.equal(r.json.corrections[0].verification, null);
+    assert.equal(r.json.verification, null, "previous gate result is stale after the partial edit");
+    assert.equal(r.json.review, null);
+    assert.equal(r.json.initialAssessment.verification.passed, false);
+    assert.equal(history(home).at(-1).status, "failed");
+    assert.equal(history(home).at(-1).testsPassed, null);
+    assert.equal(readFileSync(join(repo, "src/feature.txt"), "utf8"), "partial\n");
+  });
+
+  it("failed correction invalidates the prior passing gate and reviewer rejection", async () => {
+    const home = homeWithAgents({ claude: "edit", codex: "edit" });
+    const repo = makeRepo();
+    const agentLog = join(tempDir(), "agents.jsonl");
+    const env = { FAKE_AGENT_LOG: agentLog, FAKE_SEQUENCE: JSON.stringify({
+      workers: [
+        { edits: [{ op: "write", path: "src/feature.txt", content: "initial\n" }] },
+        { edits: [{ op: "write", path: "src/feature.txt", content: "partial\n" }], fail: "unrepairable" },
+      ],
+      reviews: [{ verdict: "REQUEST_CHANGES" }],
+    }) };
+    const r = await runCli(["run", TASK, "--json", "--risk", "high", ...PASSING_GATE], { cwd: repo, home, env });
+    assert.equal(r.json.status, "failed");
+    assert.equal(r.json.initialAssessment.verification.passed, true);
+    assert.equal(r.json.initialAssessment.review.verdict, "REQUEST_CHANGES");
+    assert.equal(r.json.verification, null);
+    assert.equal(r.json.review, null);
+    assert.equal(r.json.corrections[0].verification, null);
+    assert.equal(r.json.corrections[0].review, null);
+    assert.equal(history(home).at(-1).testsPassed, null);
+    assert.equal(history(home).at(-1).reviewPassed, null);
+    assert.equal(readFileSync(join(repo, "src/feature.txt"), "utf8"), "partial\n");
+  });
+
+  it("no gates or reviewer never promote pending-review to verified", async () => {
+    const home = homeWithAgents({ claude: "edit" });
+    const r = await runCli(["run", TASK, "--json", "--review", "none"], { cwd: makeRepo(), home });
+    assert.equal(r.json.status, "pending-review");
+    assert.equal(r.json.verification.passed, null);
+    assert.equal(r.json.corrections.length, 0);
+  });
+
+  it("unsafe scope edits and a writing reviewer prevent any correction or verification claim", async () => {
+    const home = homeWithAgents({ claude: "edit", codex: "edit" });
+    const repo = makeRepo();
+    const unsafe = await runCli(["run", TASK, "--json", "--files", "src/feature.txt", "--gate", "node -e process.exit(1)"], {
+      cwd: repo, home, env: { FAKE_EDITS: JSON.stringify([{ op: "write", path: "outside.txt", content: "keep\n" }]) },
+    });
+    assert.equal(unsafe.json.status, "needs-attention");
+    assert.equal(unsafe.json.corrections.length, 0);
+    assert.equal(readFileSync(join(repo, "outside.txt"), "utf8"), "keep\n");
+    const repo2 = makeRepo();
+    const writing = await runCli(["run", TASK, "--json", "--risk", "high", ...PASSING_GATE], {
+      cwd: repo2, home, env: { FAKE_REVIEW_WRITES: "reviewer.txt", FAKE_VERDICT: "REQUEST_CHANGES" },
+    });
+    assert.equal(writing.json.status, "needs-attention");
+    assert.equal(writing.json.corrections.length, 0);
+    assert.equal(writing.json.review.readOnlyViolation, true);
+    assert.ok(existsSync(join(repo2, "reviewer.txt")));
+  });
+
   it("worker timeout is enforced and reported", async () => {
     const home = homeWithAgents({ claude: "timeout" });
     const repo = makeRepo();

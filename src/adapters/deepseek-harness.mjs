@@ -30,6 +30,7 @@ import { SAFE_TOKEN, childEnv, defineAdapter, parseJsonLine } from "./base.mjs";
 export const PRESET = "smart-delegate";
 export const WEB_ROWS = ["tool-web", "web", "web-search-deepseek", "web-fetch-http"];
 const ROUTE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const BUILTIN_DEEPSEEK = new Set(["deepseek-official", "deepseek-account"]);
 const DUMP_TIMEOUT_MS = 60_000;
 
 export function dshHome(agentConfig = {}) {
@@ -55,7 +56,7 @@ function selection(req) {
 }
 
 /** The per-run patch (plain data; serialized as JSON). */
-export function buildPatch({ cwd, readOnly, provider, model, effort, declareRoute }) {
+export function buildPatch({ cwd, readOnly, provider, model, effort, declareRoute, providerProfile = null }) {
   const sandbox = readOnly ? "read-only" : "workspace-write";
   const rows = [
     { id: "sandbox-policy", config: { mode: sandbox, workspaceRoot: cwd } },
@@ -70,7 +71,12 @@ export function buildPatch({ cwd, readOnly, provider, model, effort, declareRout
   if (model !== null) {
     rows.unshift({ id: "agent-default-model", config: { provider, model, ...(effort ? { reasoningEffort: effort } : {}) } });
   }
-  if (declareRoute) rows.push({ id: "llm-pi-ai", config: { providers: { [provider]: {} } } });
+  if (providerProfile?.__row === "llm-deepseek") {
+    const { __row, ...config } = providerProfile;
+    rows.push({ id: "llm-deepseek", config });
+  } else if (provider !== null && (declareRoute || providerProfile)) {
+    rows.push({ id: "llm-pi-ai", config: { providers: { [provider]: providerProfile ?? {} } } });
+  }
   return rows;
 }
 
@@ -190,13 +196,30 @@ const adapter = defineAdapter({
     const dump = (patchFile) => probe(req.binaryPath, ["--profile", "headless", ...(patchFile ? ["--patch", patchFile] : []), "--dump-config"], { cwd: req.cwd, env, timeoutMs: DUMP_TIMEOUT_MS });
 
     let declareRoute = false;
-    if (sel.provider !== null && agentConfig.declareRoutes !== false) {
+    if (sel.provider !== null && !BUILTIN_DEEPSEEK.has(sel.provider) && agentConfig.declareRoutes !== false) {
       const base = dump(null);
       if (/ENOENT/.test(base.error ?? "")) return { status: "unavailable", failure: { class: "ENVIRONMENT", scope: "agent", reason: `dsh not found: ${base.error}` } };
       if (!base.ok) return { failure: { class: "ENVIRONMENT", scope: "agent", reason: `dsh --dump-config failed: ${(base.stderr || base.error || "").trim().slice(0, 300)}` } };
       declareRoute = !routeDeclared(base.stdout, sel.provider);
     }
-    const patch = buildPatch({ cwd: req.cwd, readOnly: Boolean(req.readOnly), provider: sel.provider, model: sel.model, effort: req.effort ?? null, declareRoute });
+    let providerProfile = null;
+    try {
+      providerProfile = JSON.parse(process.env.SMART_DELEGATE_DSH_PROVIDER_PROFILES ?? "{}")[sel.provider] ?? null;
+    } catch {
+      return { failure: { class: "ENVIRONMENT", scope: "agent", reason: "invalid Harness provider settings bridge" } };
+    }
+    if (providerProfile?.__invalid) {
+      return { failure: { class: "ENVIRONMENT", scope: "agent", reason: `Harness provider ${sel.provider}: ${providerProfile.__invalid}` } };
+    }
+    // DSH's Models page permits a custom endpoint without an API key, while
+    // pi-ai still requires a nonempty credential string to start a request.
+    // A fixed, non-secret placeholder lets such endpoints run; configured
+    // credentials keep their own apiKeyEnv and are never replaced.
+    if (providerProfile?.baseURL && providerProfile.api && Array.isArray(providerProfile.models) && !providerProfile.apiKeyEnv) {
+      providerProfile = { ...providerProfile, apiKeyEnv: "SMART_DELEGATE_KEYLESS_PROVIDER" };
+      env.SMART_DELEGATE_KEYLESS_PROVIDER = "local";
+    }
+    const patch = buildPatch({ cwd: req.cwd, readOnly: Boolean(req.readOnly), provider: sel.provider, model: sel.model, effort: req.effort ?? null, declareRoute, providerProfile });
     const patchPath = join(req.outDir, "dsh-patch.json");
     writeFileSync(patchPath, `${JSON.stringify(patch, null, 2)}\n`, { mode: 0o600 });
     const composed = dump(patchPath);
@@ -204,6 +227,9 @@ const adapter = defineAdapter({
     if (!composed.ok) return { failure: { class: "ENVIRONMENT", scope: "agent", reason: `dsh --dump-config rejected the patch: ${(composed.stderr || composed.error || "").trim().slice(0, 300)}` } };
     writeFileSync(join(req.outDir, "dsh-composed-config.yml"), composed.stdout, { mode: 0o600 });
     const problems = verifyDump(composed.stdout, composed.stderr, patch);
+    if (providerProfile?.baseURL && !rowBlock(composed.stdout, providerProfile.__row ?? "llm-pi-ai")?.includes(providerProfile.baseURL)) {
+      problems.push(`provider ${sel.provider} did not retain its configured endpoint`);
+    }
     if (problems.length) {
       return { failure: { class: "POLICY", scope: "agent", reason: `refusing to run: harness safety config not in effect (${problems.join("; ")})` } };
     }

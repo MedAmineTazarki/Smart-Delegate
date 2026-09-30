@@ -129,6 +129,21 @@ export function buildReviewBrief({ task, profile, diffStat, diffPatch, gateSumma
   return sanitize(`${text}\n`);
 }
 
+/** A sanitized, evidence-based delta brief for the original implementer. */
+export function buildCorrectionBrief({ originalBrief, round, verification, review }) {
+  const failures = verification?.results?.filter((r) => !r.passed) ?? [];
+  const gateFeedback = failures.map((r) =>
+    `- ${r.argv.join(" ")}: exit ${r.exitCode ?? "n/a"}${r.timedOut ? " (timeout)" : ""}${r.error ? `; ${r.error}` : ""}${r.stderrTail ? `\n  stderr: ${r.stderrTail.slice(0, 1500)}` : ""}`);
+  const findings = review?.verdict === "REQUEST_CHANGES" ? review.findings?.slice(0, 3000) : null;
+  const delta = [
+    `# Correction round ${round}`,
+    "The orchestrator independently observed the failures below. Fix these specific issues in your existing work; do not restart the task or undo unrelated changes. The same gates and independent review will run again.",
+    `# Failed independent gates\n\n${gateFeedback.join("\n") || "(none)"}`,
+    `# Independent reviewer findings\n\n${findings || "(none)"}`,
+  ].join("\n\n");
+  return sanitize(`${originalBrief}\n${delta}\n`);
+}
+
 /** Parse the worker's STATUS line (a claim, recorded but never trusted). */
 export function parseWorkerReport(message) {
   const status = /^\s*STATUS:\s*(DONE|PARTIAL|BLOCKED)\b/im.exec(message ?? "")?.[1] ?? null;

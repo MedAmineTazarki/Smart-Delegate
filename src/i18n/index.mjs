@@ -5,7 +5,7 @@
 // Human output re-renders any such string in the user's language with tr():
 // it recognises which English template produced the text, extracts the
 // parameters, and formats the translated template. This also works for
-// messages read back from run.json or history, e.g. by the web UI.
+// messages read back from run.json or history.
 import { MESSAGES } from "./messages.mjs";
 
 export const LANGS = ["en", "fr"];
